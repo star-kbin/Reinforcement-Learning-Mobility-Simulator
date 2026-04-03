@@ -1,0 +1,2 @@
+case_id,policy,vehicle_count,request_count,window_start,generation_radius,generation_seed,max_wait_time,total_reward,completed_requests,cancelled_requests,success_rate,total_distance,average_wait_seconds,vehicle_operating_seconds
+case_001__vehicle_count-1__window_start-2026-04-03_08_00_00__request_count-1__radius-500.0__max_wait_time-300__seed-101,nearest,1,1,2026-04-03 08:00:00,500.0,101,300,-1.002,1,0,1.0,0.0115,160.0,210.0

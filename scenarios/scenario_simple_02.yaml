@@ -1,0 +1,17 @@
+scenario_name: simple_case_02
+requests:
+  - request_id: R1
+    created_at: 0
+    origin: [2, 2]
+    destination: [7, 7]
+    max_wait_time: 12
+  - request_id: R2
+    created_at: 2
+    origin: [6, 1]
+    destination: [9, 4]
+    max_wait_time: 7
+  - request_id: R3
+    created_at: 5
+    origin: [1, 8]
+    destination: [3, 3]
+    max_wait_time: 9

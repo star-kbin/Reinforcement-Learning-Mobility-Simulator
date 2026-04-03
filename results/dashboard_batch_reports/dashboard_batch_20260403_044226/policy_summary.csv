@@ -1,0 +1,2 @@
+policy,run_count,avg_total_reward,avg_success_rate,avg_completed_requests,avg_cancelled_requests,avg_total_distance,avg_wait_seconds,best_total_reward,best_case_id
+eta,1,-7.01,1.0,4.0,0.0,0.049,183.25,-7.01,case_001__vehicle_count-1__window_start-2026-04-03_12_00_00__request_count-4__radius-500.0__max_wait_time-600__seed-1686903714

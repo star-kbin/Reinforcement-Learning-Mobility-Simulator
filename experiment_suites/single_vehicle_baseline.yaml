@@ -1,0 +1,33 @@
+report_title: Single Vehicle Baseline Experiment Report
+base_config: ../configs/base_latlon.yaml
+base_scenario: ../scenarios/scenario_dongjak_history.yaml
+policies:
+  - nearest
+  - eta
+save_run_payloads: true
+
+fixed:
+  simulation.space_mode: latlon
+  simulation.routing_provider: local_its
+  simulation.max_time: 7200
+  simulation.time_step: 30
+  simulation.local_its_use_hourly_speed_profile: true
+  vehicles.count: 1
+  vehicles.available_time: 7200
+
+grid:
+  simulation.window_start:
+    - "2026-04-03 08:00:00"
+    - "2026-04-03 18:00:00"
+  request_generation.request_count:
+    - 4
+    - 8
+  request_generation.radius:
+    - 500
+    - 1000
+  request_generation.max_wait_time:
+    - 300
+    - 600
+  request_generation.seed:
+    - 101
+    - 202

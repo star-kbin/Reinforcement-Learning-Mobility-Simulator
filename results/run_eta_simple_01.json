@@ -1,0 +1,315 @@
+{
+  "policy_name": "eta",
+  "scenario_name": "simple_case_01",
+  "total_reward": -0.8000000000000012,
+  "metrics": {
+    "total_distance": 19.0,
+    "completed_requests": 2,
+    "cancelled_requests": 0,
+    "success_rate": 1.0
+  },
+  "vehicle_logs": [
+    {
+      "vehicle_id": "V1",
+      "position": [
+        4,
+        5
+      ],
+      "capacity": 1,
+      "speed": 1.0,
+      "available_until": 100,
+      "status": "idle",
+      "current_load": 0,
+      "assigned_request_id": null,
+      "target_position": null,
+      "distance_travelled": 9.0,
+      "completed_request_ids": [
+        "R1"
+      ]
+    },
+    {
+      "vehicle_id": "V2",
+      "position": [
+        6,
+        2
+      ],
+      "capacity": 1,
+      "speed": 1.0,
+      "available_until": 100,
+      "status": "idle",
+      "current_load": 0,
+      "assigned_request_id": null,
+      "target_position": null,
+      "distance_travelled": 10.0,
+      "completed_request_ids": [
+        "R2"
+      ]
+    }
+  ],
+  "request_logs": [
+    {
+      "request_id": "R1",
+      "created_at": 0,
+      "origin": [
+        1,
+        1
+      ],
+      "destination": [
+        4,
+        5
+      ],
+      "max_wait_time": 10,
+      "status": "completed",
+      "assigned_vehicle_id": "V1",
+      "pickup_time": 1,
+      "dropoff_time": 8,
+      "cancelled_at": null,
+      "waiting_time": 14
+    },
+    {
+      "request_id": "R2",
+      "created_at": 3,
+      "origin": [
+        8,
+        8
+      ],
+      "destination": [
+        6,
+        2
+      ],
+      "max_wait_time": 8,
+      "status": "completed",
+      "assigned_vehicle_id": "V2",
+      "pickup_time": 5,
+      "dropoff_time": 13,
+      "cancelled_at": null,
+      "waiting_time": 11
+    }
+  ],
+  "step_logs": [
+    {
+      "time": 0,
+      "action": {
+        "action_type": "ASSIGN",
+        "vehicle_id": "V1",
+        "request_id": "R1",
+        "target_position": null
+      },
+      "reward": -1.2,
+      "reward_breakdown": {
+        "waiting_penalty": -1.0,
+        "distance_penalty": -0.2,
+        "completed_bonus": 0.0,
+        "cancelled_penalty": -0.0
+      }
+    },
+    {
+      "time": 1,
+      "action": {
+        "action_type": "WAIT",
+        "vehicle_id": null,
+        "request_id": null,
+        "target_position": null
+      },
+      "reward": -0.2,
+      "reward_breakdown": {
+        "waiting_penalty": -0.0,
+        "distance_penalty": -0.2,
+        "completed_bonus": 0.0,
+        "cancelled_penalty": -0.0
+      }
+    },
+    {
+      "time": 2,
+      "action": {
+        "action_type": "WAIT",
+        "vehicle_id": null,
+        "request_id": null,
+        "target_position": null
+      },
+      "reward": -0.2,
+      "reward_breakdown": {
+        "waiting_penalty": -0.0,
+        "distance_penalty": -0.2,
+        "completed_bonus": 0.0,
+        "cancelled_penalty": -0.0
+      }
+    },
+    {
+      "time": 3,
+      "action": {
+        "action_type": "WAIT",
+        "vehicle_id": null,
+        "request_id": null,
+        "target_position": null
+      },
+      "reward": -1.2,
+      "reward_breakdown": {
+        "waiting_penalty": -1.0,
+        "distance_penalty": -0.2,
+        "completed_bonus": 0.0,
+        "cancelled_penalty": -0.0
+      }
+    },
+    {
+      "time": 4,
+      "action": {
+        "action_type": "ASSIGN",
+        "vehicle_id": "V2",
+        "request_id": "R2",
+        "target_position": null
+      },
+      "reward": -1.4,
+      "reward_breakdown": {
+        "waiting_penalty": -1.0,
+        "distance_penalty": -0.4,
+        "completed_bonus": 0.0,
+        "cancelled_penalty": -0.0
+      }
+    },
+    {
+      "time": 5,
+      "action": {
+        "action_type": "WAIT",
+        "vehicle_id": null,
+        "request_id": null,
+        "target_position": null
+      },
+      "reward": -0.4,
+      "reward_breakdown": {
+        "waiting_penalty": -0.0,
+        "distance_penalty": -0.4,
+        "completed_bonus": 0.0,
+        "cancelled_penalty": -0.0
+      }
+    },
+    {
+      "time": 6,
+      "action": {
+        "action_type": "WAIT",
+        "vehicle_id": null,
+        "request_id": null,
+        "target_position": null
+      },
+      "reward": -0.4,
+      "reward_breakdown": {
+        "waiting_penalty": -0.0,
+        "distance_penalty": -0.4,
+        "completed_bonus": 0.0,
+        "cancelled_penalty": -0.0
+      }
+    },
+    {
+      "time": 7,
+      "action": {
+        "action_type": "WAIT",
+        "vehicle_id": null,
+        "request_id": null,
+        "target_position": null
+      },
+      "reward": -0.4,
+      "reward_breakdown": {
+        "waiting_penalty": -0.0,
+        "distance_penalty": -0.4,
+        "completed_bonus": 0.0,
+        "cancelled_penalty": -0.0
+      }
+    },
+    {
+      "time": 8,
+      "action": {
+        "action_type": "WAIT",
+        "vehicle_id": null,
+        "request_id": null,
+        "target_position": null
+      },
+      "reward": 2.6,
+      "reward_breakdown": {
+        "waiting_penalty": -0.0,
+        "distance_penalty": -0.4,
+        "completed_bonus": 3.0,
+        "cancelled_penalty": -0.0
+      }
+    },
+    {
+      "time": 9,
+      "action": {
+        "action_type": "WAIT",
+        "vehicle_id": null,
+        "request_id": null,
+        "target_position": null
+      },
+      "reward": -0.2,
+      "reward_breakdown": {
+        "waiting_penalty": -0.0,
+        "distance_penalty": -0.2,
+        "completed_bonus": 0.0,
+        "cancelled_penalty": -0.0
+      }
+    },
+    {
+      "time": 10,
+      "action": {
+        "action_type": "WAIT",
+        "vehicle_id": null,
+        "request_id": null,
+        "target_position": null
+      },
+      "reward": -0.2,
+      "reward_breakdown": {
+        "waiting_penalty": -0.0,
+        "distance_penalty": -0.2,
+        "completed_bonus": 0.0,
+        "cancelled_penalty": -0.0
+      }
+    },
+    {
+      "time": 11,
+      "action": {
+        "action_type": "WAIT",
+        "vehicle_id": null,
+        "request_id": null,
+        "target_position": null
+      },
+      "reward": -0.2,
+      "reward_breakdown": {
+        "waiting_penalty": -0.0,
+        "distance_penalty": -0.2,
+        "completed_bonus": 0.0,
+        "cancelled_penalty": -0.0
+      }
+    },
+    {
+      "time": 12,
+      "action": {
+        "action_type": "WAIT",
+        "vehicle_id": null,
+        "request_id": null,
+        "target_position": null
+      },
+      "reward": -0.2,
+      "reward_breakdown": {
+        "waiting_penalty": -0.0,
+        "distance_penalty": -0.2,
+        "completed_bonus": 0.0,
+        "cancelled_penalty": -0.0
+      }
+    },
+    {
+      "time": 13,
+      "action": {
+        "action_type": "WAIT",
+        "vehicle_id": null,
+        "request_id": null,
+        "target_position": null
+      },
+      "reward": 2.8,
+      "reward_breakdown": {
+        "waiting_penalty": -0.0,
+        "distance_penalty": -0.2,
+        "completed_bonus": 3.0,
+        "cancelled_penalty": -0.0
+      }
+    }
+  ]
+}

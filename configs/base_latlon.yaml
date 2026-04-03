@@ -1,0 +1,42 @@
+simulation:
+  space_mode: latlon
+  routing_provider: local_its
+  max_time: 7200
+  time_step: 30
+  traffic_update_interval: 300
+  use_prediction_traffic: true
+  window_start: "2026-04-02 00:00:00"
+  demand_window_minutes: 30
+  road_snap_max_distance_meters: 400.0
+  road_snap_dataset: ""
+  local_its_dataset: ""
+  local_its_average_speed_kph: 25.1
+  local_its_use_hourly_speed_profile: false
+  local_its_hourly_speed_kph: [28.8, 29.3, 29.7, 29.8, 29.8, 29.1, 26.3, 24.5, 23.4, 23.3, 23.0, 23.0, 23.2, 22.9, 22.6, 22.4, 22.0, 21.6, 21.7, 22.9, 24.7, 25.5, 26.2, 27.3]
+  local_its_allow_bidirectional_fallback: true
+  random_seed: 42
+
+vehicles:
+  count: 1
+  capacity: 1
+  speed: 0.00035
+  available_time: 7200
+  initial_positions:
+    - [37.4915254, 127.0310762]
+
+reward:
+  wait_time: 1.0
+  travel_distance: 0.2
+  completed_request: 3.0
+  violation: 5.0
+  cancelled_request: 4.0
+
+options:
+  allow_reposition: true
+  max_visible_requests: 10
+
+visualization:
+  map_provider: pydeck
+
+integrations:
+  tmap_app_key: ""

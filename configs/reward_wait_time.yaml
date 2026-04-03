@@ -1,0 +1,6 @@
+reward:
+  wait_time: 2.0
+  travel_distance: 0.1
+  completed_request: 2.0
+  violation: 5.0
+  cancelled_request: 6.0

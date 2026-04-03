@@ -1,0 +1,128 @@
+scenario_name: dongjak_OD_station_lat_lon_latlon_sample
+metadata:
+  coordinate_system: latlon
+  source_file: /home/moduletest/project/STDN_share/data/dongjak_OD_station_lat_lon.csv
+  window_start: '2024-06-01 00:00:04'
+  window_minutes: 30
+  request_count: 8
+requests:
+- request_id: R1
+  created_at: 0
+  origin:
+  - 37.5135039
+  - 126.9432479
+  destination:
+  - 37.5032574
+  - 126.9607815
+  max_wait_time: 600
+  metadata:
+    pickup_at: '2024-06-01 00:00:04'
+    dropoff_at: '2024-06-01 00:15:38'
+    pickup_station_id: '9009721'
+    dropoff_station_id: '9009660'
+    trip_duration_seconds: 934
+- request_id: R2
+  created_at: 2
+  origin:
+  - 37.5121554
+  - 126.9441708
+  destination:
+  - 37.508537
+  - 126.946766
+  max_wait_time: 600
+  metadata:
+    pickup_at: '2024-06-01 00:00:06'
+    dropoff_at: '2024-06-01 00:02:25'
+    pickup_station_id: '9010307'
+    dropoff_station_id: '9009701'
+    trip_duration_seconds: 139
+- request_id: R3
+  created_at: 5
+  origin:
+  - 37.5121554
+  - 126.9441708
+  destination:
+  - 37.503811
+  - 126.948998
+  max_wait_time: 600
+  metadata:
+    pickup_at: '2024-06-01 00:00:09'
+    dropoff_at: '2024-06-01 00:06:18'
+    pickup_station_id: '9010307'
+    dropoff_station_id: '9009684'
+    trip_duration_seconds: 369
+- request_id: R4
+  created_at: 7
+  origin:
+  - 37.5075405
+  - 126.9613765
+  destination:
+  - 37.501981
+  - 126.960221
+  max_wait_time: 600
+  metadata:
+    pickup_at: '2024-06-01 00:00:11'
+    dropoff_at: '2024-06-01 00:03:03'
+    pickup_station_id: '9009674'
+    dropoff_station_id: '9009658'
+    trip_duration_seconds: 172
+- request_id: R5
+  created_at: 7
+  origin:
+  - 37.5121554
+  - 126.9441708
+  destination:
+  - 37.508537
+  - 126.946766
+  max_wait_time: 600
+  metadata:
+    pickup_at: '2024-06-01 00:00:11'
+    dropoff_at: '2024-06-01 00:01:55'
+    pickup_station_id: '9010307'
+    dropoff_station_id: '9009701'
+    trip_duration_seconds: 104
+- request_id: R6
+  created_at: 9
+  origin:
+  - 37.5075405
+  - 126.9613765
+  destination:
+  - 37.501068
+  - 126.96021
+  max_wait_time: 600
+  metadata:
+    pickup_at: '2024-06-01 00:00:13'
+    dropoff_at: '2024-06-01 00:03:51'
+    pickup_station_id: '9009674'
+    dropoff_station_id: '9009656'
+    trip_duration_seconds: 218
+- request_id: R7
+  created_at: 12
+  origin:
+  - 37.5075405
+  - 126.9613765
+  destination:
+  - 37.5032574
+  - 126.9607815
+  max_wait_time: 600
+  metadata:
+    pickup_at: '2024-06-01 00:00:16'
+    dropoff_at: '2024-06-01 00:02:46'
+    pickup_station_id: '9009674'
+    dropoff_station_id: '9009660'
+    trip_duration_seconds: 150
+- request_id: R8
+  created_at: 14
+  origin:
+  - 37.5075405
+  - 126.9613765
+  destination:
+  - 37.501068
+  - 126.96021
+  max_wait_time: 600
+  metadata:
+    pickup_at: '2024-06-01 00:00:18'
+    dropoff_at: '2024-06-01 00:03:57'
+    pickup_station_id: '9009674'
+    dropoff_station_id: '9009656'
+    trip_duration_seconds: 219

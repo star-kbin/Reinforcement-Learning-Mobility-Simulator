@@ -1,0 +1,26 @@
+simulation:
+  grid_width: 10
+  grid_height: 10
+  max_time: 100
+  time_step: 1
+  random_seed: 42
+
+vehicles:
+  count: 2
+  capacity: 1
+  speed: 1.0
+  available_time: 100
+  initial_positions:
+    - [0, 0]
+    - [9, 9]
+
+reward:
+  wait_time: 1.0
+  travel_distance: 0.2
+  completed_request: 3.0
+  violation: 5.0
+  cancelled_request: 4.0
+
+options:
+  allow_reposition: true
+  max_visible_requests: 5

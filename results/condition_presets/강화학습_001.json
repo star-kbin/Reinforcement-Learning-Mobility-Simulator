@@ -1,0 +1,42 @@
+{
+  "name": "강화학습_001",
+  "saved_at": "2026-04-03T02:22:33+00:00",
+  "spatial_mode": "latlon",
+  "vehicles": {
+    "count": 1,
+    "capacity": 1,
+    "speed": 0.000905,
+    "available_time": 7200,
+    "initial_positions": [
+      [
+        37.4915254,
+        127.0310762
+      ]
+    ]
+  },
+  "request_generation": {
+    "radius": 500.0,
+    "seed": 2659078626,
+    "request_count": 1
+  },
+  "requests": [
+    {
+      "request_id": "R1",
+      "created_at": 2749,
+      "origin": [
+        37.48912596266845,
+        127.03305209637314
+      ],
+      "destination": [
+        37.489731483762604,
+        127.02905736730675
+      ],
+      "max_wait_time": 600,
+      "metadata": {
+        "generated": true,
+        "anchor_vehicle_index": 1,
+        "generation_seed": 2659078626
+      }
+    }
+  ]
+}
