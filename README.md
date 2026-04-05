@@ -1,3 +1,5 @@
+[Demo Video (MP4)](./Reinforcement%20Learning%20Mobility%20Simulator.mp4)
+
 # Reinforcement Learning Mobility Simulator
 
 강화학습 기반 모빌리티 배차/이동 실험을 위한 시뮬레이터 및 대시보드입니다.
