@@ -1,4 +1,4 @@
-[Demo Video (MP4)](./Reinforcement%20Learning%20Mobility%20Simulator.mp4)
+[Demo Video (MP4)](https://youtu.be/ShVomcf_kZE)
 
 # Reinforcement Learning Mobility Simulator
 
