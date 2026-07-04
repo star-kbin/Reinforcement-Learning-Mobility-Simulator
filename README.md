@@ -1,5 +1,5 @@
-[Demo Video (MP4)](https://youtu.be/ShVomcf_kZE)
-[Streamlit Community Cloud App](https://reinforcement-learning-mobility-simulator.streamlit.app/)
+- [Demo Video (MP4)](https://youtu.be/ShVomcf_kZE)
+- [Streamlit Community Cloud App](https://reinforcement-learning-mobility-simulator.streamlit.app/)
 
 # Reinforcement Learning Mobility Simulator
 
