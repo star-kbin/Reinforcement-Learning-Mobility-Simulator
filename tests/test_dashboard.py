@@ -8,7 +8,6 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from streamlit.testing.v1 import AppTest
-from dashboard.tmap_view import build_tmap_html
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -22,27 +21,11 @@ class DashboardTests(unittest.TestCase):
     def assertHealthy(self, app):
         self.assertFalse(app.exception, [error.message for error in app.exception])
 
-    def test_script_data_encoding(self):
-        key = '</script><img src=x onerror="alert(1)">&한글'
-        html = build_tmap_html({"vehicle_points": []}, key, "<svg></svg>")
-        self.assertNotIn(key, html)
-        encoded = re.search(r'<script id="tmap-data" type="application/json">(.*?)</script>', html, re.S)[1]
-        self.assertEqual(json.loads(encoded)["appKey"], key)
-
-    def test_sdk_is_parser_loaded_before_map_initialization(self):
-        key = 'test&key="한글'
-        html = build_tmap_html({}, key, "<svg></svg>")
-        sdk = re.search(r'<script src="([^"]+)"></script>', html)
-        self.assertIsNotNone(sdk)
-        self.assertEqual(parse_qs(urlparse(unescape(sdk[1])).query)["appKey"], [key])
-        self.assertLess(sdk.end(), html.index('const { payload, appKey, compact }'))
-        self.assertNotIn('document.createElement("script")', html)
-
     def test_default_simple_mode_and_no_key(self):
         app = self.app()
         self.assertEqual([control.label for control in app.number_input], ["차량 수", "요청 수", "실행 시간 (초)"])
-        self.assertEqual(app.selectbox(key="sidebar_map_provider").value, "tmap")
-        self.assertTrue(any("현재는 좌표 보기" in message.value for message in app.info))
+        self.assertFalse(any("Key" in control.label for control in app.text_input))
+        self.assertFalse(any(control.label == "지도 표시 방식" for control in app.selectbox))
 
     def test_mode_switch_preserves_counts_time_and_positions(self):
         app = self.app()
@@ -78,17 +61,9 @@ class DashboardTests(unittest.TestCase):
         next(button for button in app.button if button.label == "시뮬레이션 실행").click().run()
         self.assertHealthy(app)
         self.assertIn("dashboard_result", app.session_state)
-        app.selectbox(key="sidebar_map_provider").select("coordinate").run()
-        self.assertHealthy(app)
-        self.assertFalse(any("마지막 실행 결과와 다릅니다" in message.value for message in app.warning))
-
-    def test_secrets_key_creates_tmap_component(self):
-        app = AppTest.from_file(str(ROOT / "dashboard/app.py"), default_timeout=45)
-        app.secrets["TMAP_APP_KEY"] = "test-key-not-real"
         app.run()
         self.assertHealthy(app)
-        self.assertEqual(app.text_input(key="sidebar_tmap_app_key").value, "test-key-not-real")
-        self.assertFalse(any("현재는 좌표 보기" in message.value for message in app.info))
+        self.assertFalse(any("마지막 실행 결과와 다릅니다" in message.value for message in app.warning))
 
     def test_grid_source_resets_old_settings_and_still_runs(self):
         app = self.app()
