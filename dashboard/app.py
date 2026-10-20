@@ -4424,7 +4424,6 @@ def build_map_payload(frame: dict, timeline: list[dict] | None = None) -> dict:
         )
 
     if timeline:
-        vehicles_by_id: dict[str, list[list[float]]] = {}
         initial_vehicles = timeline[0].get("vehicles", [])
         vehicle_start_points = [
             {
@@ -4435,21 +4434,9 @@ def build_map_payload(frame: dict, timeline: list[dict] | None = None) -> dict:
             }
             for vehicle in initial_vehicles
         ]
-        for snapshot in timeline:
-            for vehicle in snapshot["vehicles"]:
-                lat, lon = vehicle["position"]
-                vehicles_by_id.setdefault(vehicle["vehicle_id"], []).append([lon, lat])
-        if not actual_vehicle_paths:
-            actual_vehicle_paths = [
-                {
-                    "vehicle_id": vehicle_id,
-                    "path": dedupe_coordinates(path),
-                    "color_hex": vehicle_styles[vehicle_id]["base_hex"],
-                    "color_rgba": vehicle_styles[vehicle_id]["actual_rgba"],
-                }
-                for vehicle_id, path in vehicles_by_id.items()
-                if len(dedupe_coordinates(path)) > 1
-            ]
+        # 실제 도로 주행 좌표가 없는 경우 프레임 위치를 직선으로 연결하지 않습니다.
+        # actual_vehicle_paths는 Vehicle._record_actual_path_points로 생성된
+        # OSM 폴리라인 구간만 사용합니다. 미주행 상태는 시작/현재 마커로 표현합니다.
     else:
         vehicle_start_points = [
             {
