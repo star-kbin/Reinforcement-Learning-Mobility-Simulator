@@ -11,6 +11,47 @@
 
 대시보드를 통해 초기 상태를 조정하고 시뮬레이션 결과를 지도와 타임라인으로 확인할 수 있으며, CLI로 단일 에피소드 실행 결과를 JSON으로 저장할 수도 있습니다.
 
+## 빠른 시작: TMAP 지도와 간편 설정
+
+1. [앱 열기](https://reinforcement-learning-mobility-simulator.streamlit.app/).
+2. 왼쪽 **TMAP App Key**에 지도 서비스를 사용할 수 있는 키를 입력합니다.
+3. **정책 · 차량 수 · 요청 수 · 실행 시간**을 조정하고 **시뮬레이션 실행**을 누릅니다.
+4. 지도에서 차량, 요청 출발/도착, 이동 경로를 확인하고 결과 타임라인을 재생합니다.
+
+기본 화면은 간편 설정입니다. **상세 설정**을 켜면 기존 환경·차량별 좌표·개별 요청·보상·프리셋·배치 실험을 사용할 수 있습니다. 간편/상세 전환 시 현재 입력을 유지합니다. 요청은 `요청 다시 생성`을 누르거나 요청 수를 바꿀 때만 다시 만들며 일반 화면 갱신에는 유지됩니다.
+
+**지도와 경로 계산은 별개입니다.** 기본 지도는 TMAP, 기본 경로 계산은 기존 `local_its`입니다. TMAP 지도만 보려고 경로 계산까지 TMAP으로 바꿀 필요는 없습니다. 실제 도로 경로·교통 API를 이용하려면 상세 설정의 라우팅 백엔드를 변경하고 해당 서비스 권한도 확인합니다.
+
+키가 없으면 좌표 보기를 표시합니다. SDK 연결 실패 또는 15초 내 지도 타일을 읽지 못하면 안내와 좌표 보기로 전환하고 `다시 연결`을 제공합니다. 지도 옵션에서 OpenStreetMap·PyDeck·좌표 보기를 직접 선택할 수도 있습니다.
+
+### 로컬 실행과 키 설정
+
+```bash
+python -m pip install -r requirements.txt
+streamlit run dashboard/app.py
+```
+
+키 입력 우선순위는 **현재 화면 입력 → 환경변수 `TMAP_APP_KEY` → Streamlit Secrets**입니다. 환경변수/Secrets는 화면 입력의 초기값으로도 사용됩니다. 환경 설정을 변경했다면 앱 세션을 다시 시작합니다.
+
+Streamlit Community Cloud의 앱 Settings → Secrets에 다음 항목을 설정할 수 있습니다. 로컬에서는 [.streamlit/secrets.toml.example](.streamlit/secrets.toml.example)을 `.streamlit/secrets.toml`로 복사합니다.
+
+```toml
+TMAP_APP_KEY = "발급받은 키"
+```
+
+실제 키는 저장소·README·프리셋에 넣지 않습니다. 브라우저용 지도 SDK 특성상 지도를 보는 브라우저에는 키가 전달됩니다. 발급 서비스의 사용 권한·호출 제한을 확인하고 필요한 제한을 적용하세요. 현재 입력은 앱 세션에서만 사용하며 이 변경은 키를 파일로 저장하지 않습니다.
+
+공식 참고: [TMAP JS V2 시작하기](https://tmapapi.tmapmobility.com/main.html#webv2/guide/webGuide.sample2), [지도 생성 예제](https://tmapapi.tmapmobility.com/main.html#webv2/sample/webSample01)(2026-10-20 확인).
+
+### 변경 검증
+
+```bash
+python -m unittest discover -s tests -p "test_*.py" -v
+node --test tests/tmap_map.test.cjs
+```
+
+Python 검사는 간편/상세 전환·입력 보존·시뮬레이션·Secrets·HTML 인코딩을 확인합니다. JavaScript 검사는 SDK 대체 객체로 좌표 순서·마커·경로·타일 확인·연결 실패·재시도를 확인하며 실제 키나 과금 호출을 사용하지 않습니다. 실제 지도 인증은 본인 키를 입력한 뒤 `TMAP 지도 표시 중`과 배경 지도를 확인하세요.
+
 ## 1. 현재 프로젝트가 제공하는 것
 
 ### 1.1 공간/이동 모델
@@ -113,9 +154,11 @@
 - 정책 선택
 - 지도 표시 방식 선택
 - TMAP 키 입력
-  현재 기본 권장 흐름은 `local_its` 중심이며, TMAP은 선택적 백엔드입니다.
+  기본 지도는 TMAP이며, 키가 없으면 좌표 보기를 표시합니다. 경로 계산 기본값은 `local_its`입니다.
 
 ### 3.2 환경 설정
+
+아래 세부 옵션은 **상세 설정**에서 조정합니다. 처음에는 간편 설정의 기본 조건만 사용해도 됩니다.
 
 - Max Time
 - Time Step
