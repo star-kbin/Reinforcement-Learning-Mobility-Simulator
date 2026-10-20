@@ -9,6 +9,7 @@ const source = fs.readFileSync(path.join(__dirname, '../dashboard/tmap_map.js'),
 function setup({sdk = true, key = 'test&key=한글', mapFails = false} = {}) {
   const elements = {};
   const timers = new Set();
+  const delays = new WeakMap();
   const scripts = [];
   const maps = [], markers = [], lines = [];
   for (const id of ['status', 'map', 'fallback', 'toggle', 'retry', 'fit', 'notice', 'tmap-data']) {
@@ -36,14 +37,22 @@ function setup({sdk = true, key = 'test&key=한글', mapFails = false} = {}) {
   class Polyline { constructor(options) { lines.push(options); } setMap() {} }
   let reloaded = false;
   const window = {addEventListener() {}, location:{reload(){reloaded=true;}}};
-  if (sdk) window.Tmapv2 = {Map, LatLng, LatLngBounds, Marker, Polyline, Size:class{}, Point:class{}};
+  const sdkObject = {Map, LatLng, LatLngBounds, Marker, Polyline, Size:class{}, Point:class{}};
+  if (sdk) window.Tmapv2 = sdkObject;
   const document = {getElementById:id=>elements[id],
     createElement() { return {remove() { this.removed=true; }}; },
     head:{appendChild(script) { scripts.push(script); }}};
   vm.runInNewContext(source, {window, document, URLSearchParams,
-    setTimeout(callback) { timers.add(callback); return callback; },
+    setTimeout(callback, delay) { timers.add(callback); delays.set(callback,delay); return callback; },
     clearTimeout(callback) { timers.delete(callback); }});
-  return {elements, maps, markers, lines, timers, scripts, wasReloaded:()=>reloaded};
+  function runTimer(delay) {
+    const callback=[...timers].find(callback=>delays.get(callback)===delay);
+    assert.ok(callback,`pending timer ${delay}`);
+    timers.delete(callback);
+    callback();
+  }
+  return {elements, maps, markers, lines, timers, scripts, window, runTimer,
+    installSdk:()=>{window.Tmapv2=sdkObject;}, wasReloaded:()=>reloaded};
 }
 
 test('좌표 순서·차량/요청 마커·경로·범위', () => {
@@ -74,8 +83,12 @@ test('시간 초과 시 좌표 보기로 전환', () => {
   assert.ok(elements.notice.textContent.includes('권한'));
 });
 test('SDK 로드 실패 진단과 문서 재로딩', () => {
-  const {elements,scripts,wasReloaded} = setup({sdk:false});
+  const {elements,scripts,wasReloaded,runTimer,timers} = setup({sdk:false});
+  assert.equal(elements.fallback.hidden,true);
+  runTimer(15000);
   assert.equal(elements.fallback.hidden,false);
+  assert.equal(elements.status.textContent,'TMAP SDK 준비 대기 시간이 초과되었습니다');
+  assert.equal(timers.size,0);
   assert.ok(elements.notice.textContent.includes('SDK 로드 실패'));
   assert.ok(elements.notice.textContent.includes('IP'));
   elements.retry.listeners.click();
@@ -86,6 +99,26 @@ test('지도 생성 오류와 인증 오류를 구분', () => {
   const {elements} = setup({mapFails:true});
   assert.ok(elements.notice.textContent.includes('지도 생성 실패'));
   assert.ok(!elements.notice.textContent.includes('test&key'));
+});
+test('하위 SDK가 늦게 준비되면 기다린 뒤 지도 생성', () => {
+  const {elements,maps,installSdk,runTimer,timers} = setup({sdk:false});
+  assert.equal(elements.status.textContent,'TMAP SDK 준비 중…');
+  assert.equal(maps.length,0);
+  installSdk();
+  runTimer(100);
+  assert.equal(maps.length,1);
+  elements.map.listeners.load({target:{tagName:'IMG',naturalWidth:256,naturalHeight:256}});
+  assert.equal(elements.status.textContent,'TMAP 지도 표시 중');
+  assert.equal(timers.size,0);
+});
+test('네임스페이스만 먼저 생긴 경우에도 Map 생성자를 기다림', () => {
+  const {window,maps,installSdk,runTimer} = setup({sdk:false});
+  window.Tmapv2={};
+  runTimer(100);
+  assert.equal(maps.length,0);
+  installSdk();
+  runTimer(100);
+  assert.equal(maps.length,1);
 });
 test('키가 없을 때 외부 SDK를 호출하지 않음', () => {
   const {elements,scripts} = setup({key:'',sdk:false});
