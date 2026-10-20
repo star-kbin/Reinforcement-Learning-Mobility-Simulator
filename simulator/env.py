@@ -213,17 +213,7 @@ class MobilityEnv:
         }
 
     def _get_traffic_reference_mode(self) -> str | None:
-        if self.routing_service is None:
-            return None
-        if self.routing_service.__class__.__name__ == "LocalITSRoutingService":
-            return "local_its_network"
-        if self.routing_service.__class__.__name__ != "TmapRoutingService":
-            if self.config.get("simulation", {}).get("space_mode") == "latlon":
-                return "simple_geometry"
-            return None
-        if getattr(self.routing_service, "use_reference_time_routing", False) and self.simulation_start_time is not None:
-            return "simulation_start_gpstime"
-        return "live_or_fallback"
+        return "osm_static_network" if self.routing_service is not None else None
 
     def _get_reference_time(self, offset_seconds: int = 0) -> datetime | None:
         if self.simulation_start_time is None:
