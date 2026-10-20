@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 import sys
 
@@ -25,14 +24,10 @@ def main() -> None:
     parser.add_argument("--scenario", required=True)
     parser.add_argument("--policy", default="nearest", choices=["random", "nearest", "eta"])
     parser.add_argument("--output", default=None)
-    parser.add_argument("--tmap-app-key", default=os.environ.get("TMAP_APP_KEY"))
     args = parser.parse_args()
 
     config = load_config(args.config)
     scenario = load_scenario(args.scenario)
-    if args.tmap_app_key:
-        config.setdefault("integrations", {})
-        config["integrations"]["tmap_app_key"] = args.tmap_app_key
     env = MobilityEnv(config=config, scenario=scenario)
     policy = build_policy(args.policy)
     result = run_episode(env, policy)
