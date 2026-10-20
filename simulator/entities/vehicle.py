@@ -132,6 +132,16 @@ class Vehicle:
             self._record_actual_path_points(travelled_segment)
             return self.active_route_distance * max(current_fraction - previous_fraction, 0.0)
 
+        # 위경도 모드에서는 경로 탐색이 실패했을 때 목표까지 직선으로
+        # 이동시키지 않습니다. 도로망이 없는 상태를 가짜 주행으로 표시하면
+        # 지도와 거리/보상 지표 모두 왜곡됩니다. 격자 모드만 기존 이동 유지.
+        is_grid = all(
+            float(value).is_integer()
+            for value in (*self.position, *self.target_position)
+        )
+        if not is_grid:
+            return 0.0
+
         previous = self.position
         self.position = step_toward(self.position, self.target_position, self.speed)
         return float(distance_between(previous, self.position))
