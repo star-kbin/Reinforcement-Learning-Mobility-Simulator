@@ -30,7 +30,7 @@ class DashboardTests(unittest.TestCase):
         with patch("dashboard.app.components.html") as component:
             render_openstreetmap_map(env.timeline[0], show_supporting_info=False)
         html = component.call_args.args[0]
-        self.assertLess(html.index(".setView([37.501"), html.index("marker.bringToFront()"))
+        self.assertLess(html.index("map.fitBounds(payload.view_bounds"), html.index("marker.bringToFront()"))
         self.assertIn("https://tile.openstreetmap.org/", html)
         self.assertIn("https://www.openstreetmap.org/copyright", html)
         self.assertIn("showFallback", html)
@@ -46,6 +46,7 @@ class DashboardTests(unittest.TestCase):
     def test_default_simple_mode_and_no_key(self):
         app = self.app()
         self.assertEqual([control.label for control in app.number_input], ["차량 수", "요청 수", "실행 시간 (초)"])
+        self.assertEqual(app.session_state["dashboard_editor_snapshot"]["config"]["vehicles"]["initial_positions"], [[37.513620, 126.941570]])
         self.assertFalse(any("Key" in control.label for control in app.text_input))
         self.assertFalse(any(control.label == "지도 표시 방식" for control in app.selectbox))
 
@@ -86,6 +87,49 @@ class DashboardTests(unittest.TestCase):
         app.run()
         self.assertHealthy(app)
         self.assertFalse(any("마지막 실행 결과와 다릅니다" in message.value for message in app.warning))
+
+    def test_playback_keeps_complete_episode_bounds(self):
+        app = self.app()
+        next(button for button in app.button if button.label == "시뮬레이션 실행").click().run()
+        self.assertHealthy(app)
+        result = app.session_state["dashboard_result"]
+        original_bounds = result["map_view_bounds"]
+        self.assertIsNotNone(original_bounds)
+        slider = next(control for control in app.slider if control.label == "단계별 결과 보기")
+        last_frame = slider.max
+        slider.set_value(0).run()
+        self.assertHealthy(app)
+        self.assertEqual(app.session_state["dashboard_result"]["map_view_bounds"], original_bounds)
+        next(control for control in app.slider if control.label == "단계별 결과 보기").set_value(last_frame // 2).run()
+        self.assertHealthy(app)
+        self.assertEqual(app.session_state["dashboard_result"]["map_view_bounds"], original_bounds)
+
+    def test_bounds_include_detours_future_requests_and_stationary_case(self):
+        from dashboard.app import build_map_view_bounds, render_openstreetmap_map
+        from unittest.mock import patch
+        timeline = [
+            {"vehicles": [{"position": [37.51362,126.94157], "active_route_path": [[37.52,126.93],[37.51,126.94]]}], "requests": []},
+            {"vehicles": [{"position": [37.51,126.94], "route_history_paths": [[[37.53,126.92],[37.51,126.94]]]}],
+             "requests": [{"origin":[37.50,126.95], "destination":[37.49,126.96]}]},
+        ]
+        bounds = build_map_view_bounds(timeline)
+        self.assertLess(bounds[0][0],37.49)
+        self.assertLess(bounds[0][1],126.92)
+        self.assertGreater(bounds[1][0],37.53)
+        self.assertGreater(bounds[1][1],126.96)
+        self.assertIsNone(build_map_view_bounds([]))
+        stationary = build_map_view_bounds([{"vehicles":[{"position":[37.51362,126.94157]}]}])
+        self.assertGreater(stationary[1][0]-stationary[0][0],0)
+        payload = {"vehicle_points":[{"coordinates":[126.94,37.51]}], "vehicle_start_points":[], "request_origin_points":[], "request_destination_points":[]}
+        with patch("dashboard.app.build_map_payload",return_value=payload), patch("dashboard.app.build_coordinate_svg",return_value="<svg></svg>"), patch("dashboard.app.components.html") as component:
+            render_openstreetmap_map({}, timeline=[], view_bounds=bounds, show_supporting_info=False)
+        html = component.call_args.args[0]
+        encoded = re.search(r"const payload = (.*?);",html)[1]
+        self.assertEqual(json.loads(encoded)["view_bounds"],bounds)
+        self.assertIn("scrollWheelZoom: !fixedCamera",html)
+        self.assertIn("dragging: !fixedCamera",html)
+        self.assertIn("animate: false",html)
+        self.assertIn("!fixedCamera && pointCandidates.length > 1",html)
 
     def test_grid_source_resets_old_settings_and_still_runs(self):
         app = self.app()
