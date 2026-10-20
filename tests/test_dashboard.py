@@ -37,6 +37,7 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(parse_qs(urlparse(unescape(sdk[1])).query)["appKey"], [key])
         self.assertLess(sdk.end(), html.index('const { payload, appKey, compact }'))
         self.assertNotIn('document.createElement("script")', html)
+        self.assertLess(html.index('id="notice"'), html.index('id="map"'))
 
     def test_default_simple_mode_and_no_key(self):
         app = self.app()
