@@ -10,7 +10,6 @@
   const fit = document.getElementById("fit");
   let map = null;
   let timer = null;
-  let sdkScript = null;
   let attempt = 0;
   let failed = false;
   const markers = [];
@@ -46,12 +45,18 @@
     }
   }
 
-  function fail() {
+  function fail(stage = "tiles") {
     failed = true;
     clearTimeout(timer);
     status.textContent = "TMAP 지도를 불러오지 못했습니다";
-    document.getElementById("notice").textContent =
-      "App Key의 지도 서비스 권한·호출 한도와 네트워크를 확인하세요. 현재는 좌표 보기를 표시합니다.";
+    const messages = {
+      key: "키가 비어 있습니다. 앱 왼쪽에 TMAP App Key를 입력하세요.",
+      sdk: "지도 SDK 로드 실패: 지도 서비스 인증·접근 허용 IP·네트워크 차단을 확인하세요.",
+      init: "지도 생성 실패: SDK 초기화 또는 지도 표시 영역을 확인해야 합니다.",
+      tiles: "배경 지도 응답 확인 실패: 지도 서비스 권한·호출 한도·네트워크를 확인하세요.",
+    };
+    document.getElementById("notice").textContent = (messages[stage] || messages.tiles) +
+      " 현재는 좌표 보기입니다. 다시 연결해도 같으면 이 안내 문구를 알려 주세요(키는 제외).";
     retry.hidden = false;
     showCoordinates(true);
   }
@@ -98,12 +103,16 @@
   function initialize(currentAttempt) {
     if (currentAttempt !== attempt) return;
     try {
-      if (!window.Tmapv2 || !coordinates.length) {
-        fail();
+      if (!window.Tmapv2 || typeof window.Tmapv2.Map !== "function") {
+        fail("sdk");
+        return;
+      }
+      if (!coordinates.length) {
+        fail("init");
         return;
       }
       map = new window.Tmapv2.Map("map", {
-        center: latLng(coordinates[0]), width: "100%", height: "100%",
+        center: latLng(coordinates[0]), width: "100%", height: compact ? "340px" : "520px",
         zoom: compact ? 14 : 15, zoomControl: true, scrollwheel: true,
       });
       addLines("road_network_paths", "#94a3b8", 2, 0.45);
@@ -121,7 +130,7 @@
         .forEach(image => tileReady({target: image}));
     } catch (_) {
       // SDK 에러 문자열에 키나 요청 URL이 포함될 수 있어 화면에 그대로 노출하지 않습니다.
-      fail();
+      fail("init");
     }
   }
 
@@ -138,18 +147,13 @@
     document.getElementById("notice").textContent = "차량 · 요청 출발/도착 · 이동 경로를 표시합니다.";
     retry.hidden = true;
     fit.disabled = true;
-    if (!appKey.trim()) { fail(); return; }
-    timer = setTimeout(fail, 15000);
-    if (window.Tmapv2) { initialize(currentAttempt); return; }
-    if (sdkScript) sdkScript.remove();
-    sdkScript = document.createElement("script");
-    sdkScript.src = "https://apis.openapi.sk.com/tmap/jsv2?" + new URLSearchParams({ version: "1", appKey });
-    sdkScript.onload = () => initialize(currentAttempt);
-    sdkScript.onerror = () => { if (currentAttempt === attempt) fail(); };
-    document.head.appendChild(sdkScript);
+    if (!appKey.trim()) { fail("key"); return; }
+    timer = setTimeout(() => fail("tiles"), 15000);
+    initialize(currentAttempt);
   }
   toggle.addEventListener("click", () => showCoordinates(fallback.hidden));
-  retry.addEventListener("click", start);
+  // iframe의 원본 srcdoc를 다시 파싱해 SDK의 document.write 경로도 재시도합니다.
+  retry.addEventListener("click", () => window.location.reload());
   fit.addEventListener("click", fitBounds);
   window.addEventListener("resize", () => { if (map && !mapElement.hidden) map.resize(); });
   start();
