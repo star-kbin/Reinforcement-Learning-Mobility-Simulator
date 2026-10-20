@@ -1,461 +1,92 @@
-- [Demo Video (MP4)](https://youtu.be/ShVomcf_kZE)
-- [Streamlit Community Cloud App](https://reinforcement-learning-mobility-simulator.streamlit.app/)
+# 강화학습 모빌리티 시뮬레이터
 
-# Reinforcement Learning Mobility Simulator
+차량 배차 정책을 비교하고 차량·요청·이동 경로를 지도에서 확인하는 Python/Streamlit 학습용 앱입니다.
 
-강화학습 기반 모빌리티 배차/이동 실험을 위한 시뮬레이터 및 대시보드입니다.
-현재 버전은 `로컬 ITS 도로망 + 시간대별 평균 속도 + step 기반 환경`을 중심으로, 다음 두 가지를 빠르게 반복할 수 있도록 구성되어 있습니다.
-
-- 정책 비교: `random`, `nearest`, `eta`
-- RL 환경 설계 점검: 상태, 행동, 보상, 종료 조건, 시나리오, 결과 분석 흐름 정리
-
-대시보드를 통해 초기 상태를 조정하고 시뮬레이션 결과를 지도와 타임라인으로 확인할 수 있으며, CLI로 단일 에피소드 실행 결과를 JSON으로 저장할 수도 있습니다.
-
-## 빠른 시작: TMAP 지도와 간편 설정
-
-1. [앱 열기](https://reinforcement-learning-mobility-simulator.streamlit.app/).
-2. 왼쪽 **TMAP App Key**에 지도 서비스를 사용할 수 있는 키를 입력합니다.
-3. **정책 · 차량 수 · 요청 수 · 실행 시간**을 조정하고 **시뮬레이션 실행**을 누릅니다.
-4. 지도에서 차량, 요청 출발/도착, 이동 경로를 확인하고 결과 타임라인을 재생합니다.
-
-기본 화면은 간편 설정입니다. **상세 설정**을 켜면 기존 환경·차량별 좌표·개별 요청·보상·프리셋·배치 실험을 사용할 수 있습니다. 간편/상세 전환 시 현재 입력을 유지합니다. 요청은 `요청 다시 생성`을 누르거나 요청 수를 바꿀 때만 다시 만들며 일반 화면 갱신에는 유지됩니다.
-
-**지도와 경로 계산은 별개입니다.** 기본 지도는 TMAP, 기본 경로 계산은 기존 `local_its`입니다. TMAP 지도만 보려고 경로 계산까지 TMAP으로 바꿀 필요는 없습니다. 실제 도로 경로·교통 API를 이용하려면 상세 설정의 라우팅 백엔드를 변경하고 해당 서비스 권한도 확인합니다.
-
-키가 없으면 좌표 보기를 표시합니다. SDK 연결 실패 또는 15초 내 지도 타일을 읽지 못하면 안내와 좌표 보기로 전환하고 `다시 연결`을 제공합니다. 지도 옵션에서 OpenStreetMap·PyDeck·좌표 보기를 직접 선택할 수도 있습니다.
-
-Free TMAP 상품이 활성화되어도 SDK 로딩·지도 표시 영역·접근 허용 IP·브라우저 차단에 따라 표시가 실패할 수 있습니다. 앱은 `SDK 로드 실패` / `지도 생성 실패` / `배경 지도 응답 확인 실패`를 구분해 안내합니다. 키를 제외한 안내 문구로 실패 단계를 확인하세요. `다시 연결`은 지도 iframe을 다시 불러옵니다.
-
-JS V2 로더가 하위 스크립트를 `document.write`로 불러오는 환경을 고려해 SDK는 HTML의 정적 script 태그로 먼저 로드합니다. 지도는 픽셀 높이를 지정하여 iframe 안에서 높이가 사라지지 않도록 합니다. [SK 공식 Q&A의 SDK 로딩 관련 보고](https://openapi.sk.com/qnaCommunity/427)는 로딩 문제의 참고 사례이며, 현재 사용자 키의 인증 실패를 의미하지는 않습니다.
-
-### 로컬 실행과 키 설정
+## 빠른 시작
 
 ```bash
 python -m pip install -r requirements.txt
 streamlit run dashboard/app.py
 ```
 
-키 입력 우선순위는 **현재 화면 입력 → 환경변수 `TMAP_APP_KEY` → Streamlit Secrets**입니다. 환경변수/Secrets는 화면 입력의 초기값으로도 사용됩니다. 환경 설정을 변경했다면 앱 세션을 다시 시작합니다.
+1. 차량 수, 요청 수, 실행 시간을 조정합니다.
+2. **시뮬레이션 실행**을 누릅니다.
+3. OSM 지도에서 차량·승하차 위치·계획 경로·실제 이동 경로를 확인합니다.
+4. 타임라인을 재생하고 정책별 완료 요청 수, 대기 시간, 이동 거리를 비교합니다.
 
-Streamlit Community Cloud의 앱 Settings → Secrets에 다음 항목을 설정할 수 있습니다. 로컬에서는 [.streamlit/secrets.toml.example](.streamlit/secrets.toml.example)을 `.streamlit/secrets.toml`로 복사합니다.
+API 키 발급이나 Secrets 설정은 필요하지 않습니다. 지도는 **OpenStreetMap + Leaflet**, 위경도 경로 계산은 **저장소에 포함한 OSM 도로망 + Dijkstra**를 사용합니다. 이전 지도 SDK와 API 키 입력·환경변수·경로 API 호출을 제거했습니다. 이전 프리셋의 지도/라우팅 선택은 OSM으로 전환하고 `integrations`는 화면 저장에서 제거합니다.
 
-```toml
-TMAP_APP_KEY = "발급받은 키"
+기본 화면에는 정책·차량 수·요청 수·실행 시간만 표시합니다. **상세 설정**에서 개별 좌표, 일정 평균 속도, 요청, 보상, 프리셋, 배치 실험을 조정할 수 있습니다. 간편/상세 전환 시 입력을 보존하며, 요청은 수를 바꾸거나 **요청 다시 생성**을 누를 때만 바뀝니다.
+
+## 지도와 경로의 동작
+
+| 기능 | 구현 | 인터넷 필요 |
+| --- | --- | --- |
+| 배경 지도 | OpenStreetMap 표준 타일, Leaflet | 필요 |
+| 자동차 도로 경로 | 내장 OSM 방향 그래프, 최단 거리 탐색 | 불필요 |
+| 소요 시간 | 도로·연결 거리 ÷ 설정 평균 속도 | 불필요 |
+| 지도 연결 실패 시 | 차량·요청·경로를 SVG 좌표 화면으로 표시 | 불필요 |
+| 주소 검색 | Nominatim, 사용자가 검색할 때만 요청 | 필요 |
+
+OSM 타일은 지도 배경입니다. 경로는 타일이나 공용 경로 서버에 의존하지 않고 앱에서 계산합니다. 경로 캐시는 서비스별 최대 512개이며, 도로 그래프는 프로세스에서 재사용합니다. 지도 로딩이 지연되면 최대 15초 후 좌표 보기로 전환하고, 타일이 도착하면 지도 표시를 복구합니다. Leaflet 파일 자체가 차단돼도 좌표 보기를 제공합니다.
+
+### 기본 도로망 범위
+
+서울 동작·서초 및 인접 강남 실습 지역: **위도 37.475~37.535, 경도 126.915~127.055**. 기본 강남 시작점과 동작구 시나리오를 포함합니다. 자세한 출처·재생성 방법은 [OSM 데이터 안내](data/osm/README.md)를 참고하세요.
+
+- 일방통행과 자동차 접근 제한을 반영합니다. 끊긴 도로를 임의로 역방향 연결하지 않습니다.
+- 입력 좌표 주변 최대 500m 안에서 도로 후보를 찾습니다. 입력 위치와 도로 사이 짧은 진입·진출 연결선은 도로 구간과 구분해 `connector_distance_meters`에 기록합니다.
+- 지도에 보이는 모든 지역을 경로 탐색할 수 있는 것은 아닙니다. 범위 밖 좌표, 가까운 자동차 도로 부재, 연결 경로 부재는 오류로 안내하며 직선 도로 경로로 대체하지 않습니다.
+- 실시간 교통, 회전 제한 관계, 차선 안내, 시간별 통행 제한은 반영하지 않습니다. 실제 운전용 내비게이션이 아닌 정책 비교 학습 도구입니다.
+- 공용 지도 타일·주소 검색 서비스의 가용성은 보장되지 않습니다. 이 경우에도 내장 도로 경로 계산은 가능합니다.
+
+### 설정 예시
+
+```yaml
+simulation:
+  space_mode: latlon
+  routing_provider: osm
+  osm_average_speed_kph: 25.0
+  osm_max_snap_meters: 500.0
+  # 다른 지역 그래프를 준비한 경우 선택 지정
+  # osm_graph_path: data/osm/my_region.json.gz.b64
+visualization:
+  map_provider: openstreetmap
 ```
 
-실제 키는 저장소·README·프리셋에 넣지 않습니다. 브라우저용 지도 SDK 특성상 지도를 보는 브라우저에는 키가 전달됩니다. 발급 서비스의 사용 권한·호출 제한을 확인하고 필요한 제한을 적용하세요. 현재 입력은 앱 세션에서만 사용하며 이 변경은 키를 파일로 저장하지 않습니다.
+`grid` 시나리오는 기존 격자 이동을 유지합니다. 과거 `local_its` 설정도 위경도 모드에서는 OSM 계산으로 전환됩니다. 평균 속도는 `osm_average_speed_kph`로 지정합니다.
 
-공식 참고: [TMAP JS V2 시작하기](https://tmapapi.tmapmobility.com/main.html#webv2/guide/webGuide.sample2), [지도 생성 예제](https://tmapapi.tmapmobility.com/main.html#webv2/sample/webSample01)(2026-10-20 확인).
+## 명령행 실행
 
-### 변경 검증
+```bash
+python scripts/run_simulation.py --config configs/base_latlon.yaml --scenario scenarios/scenario_dongjak_history.yaml --policy nearest --output results/osm_demo.json
+python scripts/run_simulation.py --config configs/base.yaml --scenario scenarios/scenario_simple_01.yaml --policy nearest
+```
+
+정책: `nearest`는 좌표상 가까운 차량, `eta`는 기존 간이 ETA 기준, `random`은 임의의 유효 배차입니다. 정책의 차량 선택 추정과 실제 OSM 주행 시간은 다를 수 있습니다. 학습 알고리즘을 자동 훈련하는 앱은 아니며 baseline 정책 비교와 확장을 위한 환경입니다.
+
+요청은 `waiting → assigned → picked_up → completed`로 이동하고 대기 제한을 넘으면 취소됩니다. 에피소드는 최대 시간 도달 또는 모든 요청 처리·취소 시 종료합니다. 보상은 대기/이동 패널티, 완료 보너스, 취소 패널티 중심입니다. `violation` 설정은 현재 계산에 직접 합산되지 않습니다.
+
+## 검증
 
 ```bash
 python -m unittest discover -s tests -p "test_*.py" -v
-node --test tests/tmap_map.test.cjs
 ```
 
-Python 검사는 간편/상세 전환·입력 보존·시뮬레이션·Secrets·HTML 인코딩을 확인합니다. JavaScript 검사는 SDK 대체 객체로 좌표 순서·마커·경로·타일 확인·연결 실패·재시도를 확인하며 실제 키나 과금 호출을 사용하지 않습니다. 실제 지도 인증은 본인 키를 입력한 뒤 `TMAP 지도 표시 중`과 배경 지도를 확인하세요.
-
-## 1. 현재 프로젝트가 제공하는 것
-
-### 1.1 공간/이동 모델
-
-- 기본 좌표계는 `lat/lon`
-- 기본 라우팅 백엔드는 `local_its`
-- 로컬 ITS 그래프와 도로 geometry를 사용해 실제 도로 형상을 따라 이동 경로를 생성
-- 이동 시간은 아래 두 방식 중 하나로 계산
-  - 고정 평균 속도 `ITS 평균 속도 (km/h)`
-  - 24시간 속도표 기반 시간대별 속도
-- 시간 기준은 현재 `한국 시간(KST)`으로 고정
-
-### 1.2 정책 비교
-
-현재 내장 baseline 정책:
-
-- `random`: 가능한 행동 중 임의 선택
-- `nearest`: 가장 가까운 차량 기준 배차
-- `eta`: 예상 도착시간이 가장 짧은 차량 기준 배차
-
-### 1.3 시뮬레이션 환경
-
-현재 환경은 다음 흐름으로 동작합니다.
-
-1. 시작 시각 `window_start`에서 에피소드 시작
-2. 각 step마다 요청 활성화
-3. 정책이 현재 상태에서 행동 선택
-4. 차량 이동 및 승하차 처리
-5. 보상 계산
-6. 종료 조건 확인
-7. 타임라인/로그 저장
-
-관련 핵심 구현:
-
-- 환경: [env.py](/home/moduletest/project/RL_simulator/simulator/env.py)
-- 라우팅: [routing.py](/home/moduletest/project/RL_simulator/simulator/routing.py)
-- 보상: [weighted_reward.py](/home/moduletest/project/RL_simulator/simulator/rewards/weighted_reward.py)
-- 행동 공간: [action_space.py](/home/moduletest/project/RL_simulator/simulator/action_space.py)
-- 상태 인코더: [state_encoder.py](/home/moduletest/project/RL_simulator/simulator/state_encoder.py)
-
-## 2. 현재 RL 관점에서의 환경 정의
-
-### 2.1 상태(State)
-
-현재 정책 입력 상태는 단순 dict 구조입니다.
-
-- 현재 시각 `current_time`
-- 차량 리스트
-- 요청 리스트
-
-차량에는 위치, 상태, 용량, 현재 적재, 배정 요청 등이 포함되고, 요청에는 출발지/도착지, 상태, 대기 시간 등이 포함됩니다.
-
-즉, 현재는 “학습용으로 바로 쓰기 쉬운 벡터형 인코더”보다는 “정책/디버깅 친화적 객체형 상태”에 가깝습니다.
-
-### 2.2 행동(Action)
-
-현재 실제 행동 공간은 매우 단순합니다.
-
-- `WAIT`
-- `ASSIGN(vehicle_id, request_id)`
-
-즉, MVP 기준으로는 “대기 중 요청을 유휴 차량에 배차할지 여부”가 핵심입니다.  
-문서상 재배치(reposition) 방향은 열려 있지만, 현재 action space에는 직접 포함되어 있지 않습니다.
-
-### 2.3 보상(Reward)
-
-현재 step 보상은 가중합 구조입니다.
-
-`Reward = - waiting_penalty - distance_penalty + completed_bonus - cancelled_penalty`
-
-구성 항목:
-
-- 대기 패널티: `waiting`, `assigned` 상태 요청 수 기반
-- 이동 패널티: 이번 step 이동거리 기반
-- 완료 보너스: 이번 step 완료 요청 수 기반
-- 취소 패널티: 이번 step 취소 요청 수 기반
-
-주의:
-
-- `violation` 가중치 필드는 config에 있지만, 현재 `WeightedRewardCalculator`에서 직접 합산되지는 않습니다.
-- 따라서 현재 RL 보상은 “대기/이동/완료/취소” 중심입니다.
-
-### 2.4 종료 조건
-
-에피소드는 아래 중 하나를 만족하면 종료됩니다.
-
-- `max_time` 도달
-- 모든 요청이 `completed` 또는 `cancelled`
-
-## 3. 대시보드에서 설정 가능한 실험 요소
-
-대시보드 파일:
-
-- [app.py](/home/moduletest/project/RL_simulator/dashboard/app.py)
-
-### 3.1 실행 설정
-
-- Config 선택
-- Scenario 선택
-- 정책 선택
-- 지도 표시 방식 선택
-- TMAP 키 입력
-  기본 지도는 TMAP이며, 키가 없으면 좌표 보기를 표시합니다. 경로 계산 기본값은 `local_its`입니다.
-
-### 3.2 환경 설정
-
-아래 세부 옵션은 **상세 설정**에서 조정합니다. 처음에는 간편 설정의 기본 조건만 사용해도 됩니다.
-
-- Max Time
-- Time Step
-- 라우팅 백엔드
-- 시뮬레이션 시작 시각
-- 시작 시각 기준 경로 사용 여부
-- ITS 평균 속도
-- 24시간 속도표 사용 여부
-- 시간대별 속도표 입력
-
-### 3.3 차량 설정
-
-- 차량 수
-- 용량
-- 가용 시간
-- 시작 위도/경도
-- 주소 검색 기반 시작 좌표 적용
-
-### 3.4 요청 설정
-
-- 요청 수
-- 차량 근방 생성 반경
-- 랜덤 요청 재생성
-- 생성된 요청 목록 표
-
-현재 요청은 “차량 시작 위치 주변에서 origin/destination이 겹치지 않도록 랜덤 생성”하는 방식으로 빠르게 실험할 수 있습니다.
-
-### 3.5 초기 상태 편집
-
-초기 상태 영역에서 다음을 할 수 있습니다.
-
-- 차량 시작 위치 선택
-- 요청 출발지/도착지 선택
-- 상/하/좌/우 버튼으로 미세 이동
-- 이동 간격과 이동 레벨 변경
-
-즉, RL 학습 전에 “이 초기 상태가 정책 비교에 적절한가?”를 바로 눈으로 맞추는 용도로 매우 유용합니다.
-
-## 4. 시뮬레이션 결과로 확인할 수 있는 것
-
-### 4.1 요약 지표
-
-현재 결과 요약에서 바로 볼 수 있는 대표 값:
-
-- 총 Reward
-- 완료 요청 수
-- 취소 요청 수
-- 성공률
-- 실제 이동거리(km)
-- 평균 속도(km/h)
-- 시뮬레이션 총 시간
-- 차량 운행 시간
-
-### 4.2 보상 해석
-
-대시보드에는 총 Reward 아래에 다음 합산값이 함께 표시됩니다.
-
-- 대기 페널티 합
-- 이동 페널티 합
-- 완료 보너스 합
-- 취소 페널티 합
-
-즉, “보상이 왜 그렇게 나왔는지”를 정책별로 분해해서 볼 수 있습니다.
-
-### 4.3 지도 기반 결과 확인
-
-결과 지도에서는 다음을 확인할 수 있습니다.
-
-- 차량 시작 위치
-- 차량 현재 위치
-- 요청 출발지/도착지
-- 요청 상태 변화
-- 도로망 경로
-- 계획 경로 이력
-- 실제 주행 누적 경로
-
-또한 타임라인을 step 단위로 이동하거나 자동 재생하여,
-
-- 요청 발생
-- 대기
-- 탑승 이동
-- 도착 완료
-
-흐름을 시간 순서대로 점검할 수 있습니다.
-
-### 4.4 RL 실험에서 이 결과가 의미하는 것
-
-현재 대시보드 결과는 RL 관점에서 다음 질문에 답하는 데 유용합니다.
-
-- 이 보상 설계가 원하는 방향으로 정책을 유도하는가?
-- 특정 정책이 왜 성공률은 높지만 Reward는 낮은가?
-- 이동거리 절감과 대기시간 절감 사이 trade-off가 있는가?
-- 출발지/도착지 분포가 정책 성능에 어떤 영향을 주는가?
-- 시간대별 속도표가 배차 결과를 얼마나 바꾸는가?
-
-## 5. 현재 프로젝트 기준 RL 전반 플로우
-
-현재 이 프로젝트로 추천하는 전체 흐름은 아래와 같습니다.
-
-### 5.1 1단계: 시나리오/환경 구성
-
-- Config 선택
-- 차량 수, 시작 위치, 가용 시간 설정
-- 요청 수와 생성 반경 설정
-- ITS 평균 속도 또는 24시간 속도표 설정
-- 시작 시각 설정
-
-이 단계 목표:
-
-- 학습/평가에 사용할 환경 분포를 정의
-
-### 5.2 2단계: baseline 정책으로 sanity check
-
-먼저 `random`, `nearest`, `eta`를 돌려서 아래를 확인합니다.
-
-- 성공률이 0% 또는 100%로만 나오지 않는가
-- Reward가 직관과 크게 어긋나지 않는가
-- 차량이 실제로 도로 geometry를 따라 움직이는가
-- 초기 상태가 너무 쉽거나 너무 어렵지 않은가
-
-이 단계 목표:
-
-- RL 전에 환경과 보상 자체가 정상인지 검증
-
-### 5.3 3단계: RL 학습 환경 연결
-
-현재 코드 기준 RL 연결 포인트는 아래입니다.
-
-- `env.reset()`
-- `env.get_state()`
-- `env.get_valid_actions()`
-- `env.step(action)`
-- `env.is_done()`
-- `env.get_result()`
-
-즉, 현재 구조는 baseline 비교용으로도 쓰이지만, RL agent를 붙이기 위한 최소 loop도 갖추고 있습니다.
-
-### 5.4 4단계: 학습 목표 정의
-
-현재 프로젝트에서 RL 목표는 보통 아래 중 하나로 잡을 수 있습니다.
-
-- 완료 요청 수 최대화
-- 대기시간 최소화
-- 이동거리 최소화
-- 성공률과 비용의 균형 최적화
-
-실제로는 reward weight 조합을 바꾸며 어떤 정책 성향이 생기는지 먼저 baseline으로 본 뒤, RL 학습으로 이어가는 것이 가장 안정적입니다.
-
-### 5.5 5단계: 학습 후 비교/분석
-
-학습된 정책은 baseline과 동일 조건으로 반복 비교해야 합니다.
-
-비교 권장 항목:
-
-- 총 Reward
-- 성공률
-- 평균/최대 대기시간
-- 총 이동거리
-- 차량 운행시간
-- 시간대별 성능 차이
-
-결과를 지도와 step 타임라인으로 다시 보면 “왜 그 행동을 했는지”를 정성적으로 검토할 수 있습니다.
-
-## 6. 현재 코드 기준 실행 방법
-
-### 6.1 대시보드 실행
-
-```bash
-bash /home/moduletest/project/RL_simulator/scripts/run_dashboard.sh
+검증 범위: 실제 내장 도로망 경로, 일방통행, 연결 실패/범위 오류, 캐시, 외부 네트워크 없이 기본 에피소드 실행, 간편/상세 입력 보존, 요청 재생성, 지도 HTML 안전 인코딩, 격자 모드 실행. 실행 결과에 `osm_offline` 출처와 도로 거리·연결 거리 메타데이터가 기록됩니다.
+
+## 디렉터리
+
+```text
+dashboard/          Streamlit 화면·OSM 지도·좌표 보기
+simulator/          환경, 차량, 요청, 정책, 보상, 평가
+simulator/osm_routing.py  내장 OSM 방향 그래프 경로 탐색
+data/osm/           OSM 도로망 및 데이터 출처
+configs/            실행 설정
+scenarios/          요청 시나리오
+scripts/            명령행 실행·시나리오/도로망 생성
+tests/              실행 및 회귀 검증
+results/            실행 결과·프리셋
 ```
 
-### 6.2 CLI 단일 시뮬레이션 실행
-
-```bash
-python3 /home/moduletest/project/RL_simulator/scripts/run_simulation.py \
-  --config /home/moduletest/project/RL_simulator/configs/base_latlon.yaml \
-  --scenario /home/moduletest/project/RL_simulator/scenarios/scenario_dongjak_history.yaml \
-  --policy nearest
-```
-
-결과를 JSON으로 저장하려면:
-
-```bash
-python3 /home/moduletest/project/RL_simulator/scripts/run_simulation.py \
-  --config /home/moduletest/project/RL_simulator/configs/base_latlon.yaml \
-  --scenario /home/moduletest/project/RL_simulator/scenarios/scenario_dongjak_history.yaml \
-  --policy eta \
-  --output /home/moduletest/project/RL_simulator/results/example_result.json
-```
-
-### 6.3 이력 CSV에서 시나리오 생성
-
-```bash
-python3 /home/moduletest/project/RL_simulator/scripts/build_scenario_from_history.py \
-  --input /home/moduletest/project/STDN_share/data/dongjak_OD_station_lat_lon.csv \
-  --output /home/moduletest/project/RL_simulator/scenarios/scenario_dongjak_history.yaml \
-  --config-output /home/moduletest/project/RL_simulator/configs/dongjak_history_latlon.yaml
-```
-
-### 6.4 여러 조건 자동 실험 및 레포트 생성
-
-여러 조건 조합을 자동으로 돌리고, 결과를 CSV/Markdown 레포트로 묶으려면 `suite yaml`을 사용합니다.
-
-예시 suite:
-
-- [single_vehicle_baseline.yaml](/home/moduletest/project/RL_simulator/experiment_suites/single_vehicle_baseline.yaml)
-
-실행:
-
-```bash
-python3 /home/moduletest/project/RL_simulator/scripts/run_experiment_suite.py \
-  --suite /home/moduletest/project/RL_simulator/experiment_suites/single_vehicle_baseline.yaml
-```
-
-출력:
-
-- `run_results.csv`: 개별 실행 결과 1행씩
-- `policy_summary.csv`: 정책별 평균 요약
-- `report.md`: Markdown 보고서
-- `runs/*.json`: 각 실험 상세 payload
-
-현재 suite에서 바로 바꿔볼 수 있는 대표 조건 축:
-
-- `vehicles.count`
-- `simulation.window_start`
-- `simulation.time_step`
-- `simulation.local_its_use_hourly_speed_profile`
-- `request_generation.request_count`
-- `request_generation.radius`
-- `request_generation.max_wait_time`
-- `request_generation.seed`
-
-즉, 대시보드에서 손으로 바꾸던 조건을 배치 실험으로 옮겨서 baseline 비교와 RL 학습 전 분포 점검을 자동화할 수 있습니다.
-
-## 7. 현재 프로젝트로 얻을 수 있는 대표 산출물
-
-이 프로젝트로 현재 직접 얻을 수 있는 산출물은 다음과 같습니다.
-
-- 시나리오별 정책 성능 비교 결과
-- step 타임라인 로그
-- 요청별 상태 변화 이력
-- 차량별 이동 경로 이력
-- 보상 항목별 분해 결과
-- 지도 기반 정성 분석 결과
-- RL 학습 전 환경 sanity check 결과
-
-즉, 현재 버전은 “완성된 대규모 RL 학습 시스템”이라기보다,
-
-- RL 문제 정의를 검증하고
-- baseline과 비교하며
-- 시나리오/보상/속도표/초기 상태를 빠르게 조정하고
-- 학습 전에 환경을 안정화하는 실험 플랫폼
-
-으로 보는 것이 가장 정확합니다.
-
-## 8. 현재 한계와 해석 시 주의점
-
-현재 버전 사용 시 아래 사항은 반드시 알고 있어야 합니다.
-
-### 8.1 행동 공간 한계
-
-- 실제 action space는 아직 `WAIT`, `ASSIGN` 중심
-- 재배치(reposition)는 대시보드 초기 상태 편집과는 별개이며, RL 행동으로는 직접 구현되지 않음
-
-### 8.2 보상 한계
-
-- `violation` 가중치는 현재 직접 반영되지 않음
-- 대기 패널티는 “실제 초 단위 누적”이 아니라 현재 step에서 대기/배정 상태 요청 수 기반
-
-### 8.3 교통 모델 한계
-
-- `local_its`는 실제 도로망 geometry를 사용하지만, 속도는 현재
-  - 고정 평균 속도
-  - 또는 24시간 hour-level 평균 속도
-  기반
-- 링크별 실시간 속도까지는 아직 아님
-
-### 8.4 지도 해석 주의
-
-- 시작/종료 좌표가 도로 중심선과 다르면 짧은 connector가 보일 수 있음
-- 이는 도로 geometry가 틀린 경우가 아니라 좌표 스냅 연결 구간일 수 있음
-
-## 9. 다음 단계 권장
-
-현재 프로젝트를 RL 연구/개발로 확장하려면 다음 순서를 권장합니다.
-
-1. baseline 성능 분포를 시나리오별로 충분히 수집
-2. reward 항목을 실제 목표에 맞게 재정의
-3. state를 학습 친화적 tensor/vector 형태로 추가 인코딩
-4. action mask와 후보 축소 전략 정교화
-5. 학습 루프(PPO/DQN/actor-critic 등) 연결
-6. baseline 대비 improvement를 KPI와 지도 재생으로 동시 검증
-
----
-
-현재 대시보드는 “환경 설계 -> baseline sanity check -> RL 연결 준비 -> 결과 해석”까지의 전 과정을 빠르게 반복하기 위한 실험용 인터페이스로 보는 것이 가장 적합합니다.
+지도에는 [OpenStreetMap 저작자 표시](https://www.openstreetmap.org/copyright)를 유지합니다. [OSM 타일 이용 정책](https://operations.osmfoundation.org/policies/tiles/)에 따라 일반 지도 표시만 수행하며 대량 다운로드·오프라인 타일 저장을 하지 않습니다.
