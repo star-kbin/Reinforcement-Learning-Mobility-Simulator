@@ -14,7 +14,7 @@ vehicles:
   speed: 0.00035
   available_time: 7200
   initial_positions:
-    - [37.4915254, 127.0310762]
+    - [37.513620, 126.941570]
 
 reward:
   wait_time: 1.0
