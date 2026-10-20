@@ -4719,6 +4719,7 @@ def render_openstreetmap_map(
     height = 340 if compact else 520
     component_height = height + (72 if compact else 88)
     fallback_svg = build_coordinate_svg(payload, compact=compact, include_intro=False)
+    map_controls_js = (Path(__file__).with_name("map_controls.js")).read_text(encoding="utf-8")
     html = f"""
     <!doctype html>
     <html>
@@ -4868,6 +4869,7 @@ def render_openstreetmap_map(
           crossorigin=""
         ></script>
         <script>
+          {map_controls_js}
           const payload = {json.dumps(payload, ensure_ascii=False).replace(chr(60), chr(92) + "u003c")};
           const vehicleCoreRadius = {8 if compact else 11};
           const vehicleHaloRadius = {13 if compact else 19};
@@ -4906,10 +4908,12 @@ def render_openstreetmap_map(
             const fixedCamera = Boolean(payload.view_bounds);
             const map = L.map("{map_div_id}", {{
               zoomControl: !fixedCamera,
-              scrollWheelZoom: !fixedCamera,
+              scrollWheelZoom: false,
+              zoomSnap: 0.25,
+              zoomDelta: 0.25,
               dragging: !fixedCamera,
               touchZoom: !fixedCamera,
-              doubleClickZoom: !fixedCamera,
+              doubleClickZoom: false,
               boxZoom: !fixedCamera,
               keyboard: !fixedCamera,
               zoomAnimation: false,
@@ -4920,6 +4924,10 @@ def render_openstreetmap_map(
               map.fitBounds(payload.view_bounds, {{ padding: [40, 40], maxZoom: 16, animate: false }});
             }} else {{
               map.setView([{DEFAULT_LATLON_START[0]}, {DEFAULT_LATLON_START[1]}], 13);
+            }}
+
+            if (!fixedCamera) {{
+              attachStableWheelZoom(map, L);
             }}
 
             const tileLayer = L.tileLayer("https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{

@@ -126,7 +126,9 @@ class DashboardTests(unittest.TestCase):
         html = component.call_args.args[0]
         encoded = re.search(r"const payload = (.*?);",html)[1]
         self.assertEqual(json.loads(encoded)["view_bounds"],bounds)
-        self.assertIn("scrollWheelZoom: !fixedCamera",html)
+        self.assertIn("scrollWheelZoom: false",html)
+        self.assertIn("if (!fixedCamera) {\n              attachStableWheelZoom(map, L);",html)
+        self.assertIn("zoomDelta: 0.25",html)
         self.assertIn("dragging: !fixedCamera",html)
         self.assertIn("animate: false",html)
         self.assertIn("!fixedCamera && pointCandidates.length > 1",html)
