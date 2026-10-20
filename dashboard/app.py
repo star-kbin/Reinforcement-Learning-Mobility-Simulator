@@ -4090,7 +4090,7 @@ def render_map_label_panel(payload: dict, compact: bool = False) -> None:
         )
 
     st.markdown("**라벨 안내**")
-    st.caption("맵에서는 O/D/V 번호만 보이고, 상태는 테두리 강조와 완료 시 회색 처리, 발생 전 축소 크기로 구분합니다.")
+    st.caption("지도에는 차량 번호만 상시 표시합니다. 출발지는 원형, 목적지는 사각형으로 구분하며 마우스를 올리면 요청 ID를 확인할 수 있습니다.")
     st.markdown(
         (
             f'<div style="border:1px solid #e2e8f0;border-radius:12px;background:#ffffff;'
@@ -4964,9 +4964,6 @@ def render_openstreetmap_map(
               const sizeScale = Number(point.size_scale || 1);
               const markerSize = Math.max(9, Math.round(12 * sizeScale));
               const markerBorder = Math.max(2, Number(point.border_width || 2));
-              const labelMinWidth = Math.max(22, Math.round(28 * Math.max(0.9, sizeScale)));
-              const labelHeight = Math.max(18, Math.round(20 * Math.max(0.9, sizeScale)));
-              const labelFontSize = Math.max(10, Math.round(11 * Math.max(0.92, sizeScale)));
               const pulseStyle = point.pulse ? "animation:markerPulse 1.05s ease-in-out infinite;" : "";
               const icon = L.divIcon({{
                 html: `
@@ -4984,35 +4981,16 @@ def render_openstreetmap_map(
                 iconAnchor: [markerSize / 2, markerSize / 2]
               }});
               const latlng = [point.coordinates[1], point.coordinates[0]];
-              const marker = L.marker(latlng, {{ icon }}).addTo(map).bindPopup(point.request_id || point.label || "");
-              const offset = point.label_offset || [0, -10];
-              marker.bindTooltip(
-                `
-                  <div style="
-                    display:inline-flex;
-                    align-items:center;
-                    justify-content:center;
-                    min-width:${{labelMinWidth}}px;
-                    height:${{labelHeight}}px;
-                    padding:0 6px;
-                    border-radius:${{isSquare ? "8px" : "999px"}};
-                    background:${{point.fill_hex || point.color_hex || "#f59e0b"}};
-                    border:${{markerBorder}}px solid ${{point.border_hex || "rgba(255,255,255,0.98)"}};
-                    color:${{point.text_hex || "#ffffff"}};
-                    font-size:${{labelFontSize}}px;
-                    font-weight:800;
-                    box-shadow:0 1px 6px rgba(0,0,0,0.2);
-                    white-space:nowrap;
-                    ${{pulseStyle}}
-                  ">${{escapeHtml(point.label)}}</div>
-                `,
-                {{
-                  permanent: true,
-                  direction: tooltipDirection(offset),
-                  offset: offset,
-                  className: "vehicle-tooltip"
-                }}
-              );
+              const role = isSquare ? "목적지" : "출발지";
+              const requestName = point.request_id || point.label || "-";
+              const marker = L.marker(latlng, {{ icon }}).addTo(map);
+              marker.bindPopup(escapeHtml(role + " · " + requestName));
+              marker.bindTooltip(escapeHtml(role + " · " + requestName), {{
+                permanent: false,
+                direction: "top",
+                offset: [0, -markerSize / 2 - 4],
+                className: "vehicle-tooltip"
+              }});
               pointCandidates.push(point.coordinates);
             }}
 
