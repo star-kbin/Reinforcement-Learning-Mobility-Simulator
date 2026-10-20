@@ -33,9 +33,9 @@ def build_tmap_html(payload: dict, app_key: str, fallback_svg: str, compact: boo
 <button id="fit" type="button" disabled>전체 보기</button>
 <button id="retry" type="button" hidden>다시 연결</button>
 <button id="toggle" type="button">좌표 보기</button></div>
+<p id="notice" role="alert">차량 · 요청 출발/도착 · 이동 경로를 표시합니다.</p>
 <div id="map" aria-label="TMAP 시뮬레이션 지도"></div>
 <div id="fallback" hidden>{fallback_svg}</div>
-<p id="notice">차량 · 요청 출발/도착 · 이동 경로를 표시합니다.</p>
 <script id="tmap-data" type="application/json">{data}</script>
 {sdk_tag}
 <script>{script}</script>
