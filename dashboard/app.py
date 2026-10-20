@@ -38,6 +38,7 @@ DASHBOARD_AUTOPLAY_BASE_SECONDS = 10
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from dashboard.tmap_view import build_tmap_html
 from simulator.env import MobilityEnv
 from simulator.evaluation.runner import run_episode
 from simulator.local_its_defaults import (
@@ -56,7 +57,13 @@ KST = timezone(timedelta(hours=9))
 
 
 def _default_tmap_key() -> str:
-    return os.environ.get("TMAP_APP_KEY", "")
+    environment_key = os.environ.get("TMAP_APP_KEY", "").strip()
+    if environment_key:
+        return environment_key
+    try:
+        return str(st.secrets.get("TMAP_APP_KEY", "")).strip()
+    except (FileNotFoundError, st.errors.StreamlitSecretNotFoundError):
+        return ""
 
 
 def _current_day_start_text() -> str:
@@ -125,8 +132,13 @@ def _provider_label(provider: str) -> str:
     return labels.get(provider, provider)
 
 
+def _policy_label(policy: str) -> str:
+    return {"nearest": "가까운 차량 우선", "eta": "도착시간 우선", "random": "무작위 배차"}.get(policy, policy)
+
+
 def _map_provider_label(provider: str) -> str:
     labels = {
+        "tmap": "TMAP 지도 (App Key)",
         "openstreetmap": "OpenStreetMap",
         "coordinate": "경량 좌표 맵",
         "pydeck": "PyDeck 오픈 지도",
@@ -1086,8 +1098,8 @@ def render_batch_experiment_controls(
 
 def main() -> None:
     st.set_page_config(page_title="Reinforcement Learning Mobility Simulator", layout="wide")
-    st.title("Reinforcement Learning Mobility Simulator")
-    st.caption("초기 상태를 조정하고, 시뮬레이션 진행 결과를 step 단위로 확인할 수 있습니다.")
+    st.title("모빌리티 시뮬레이터")
+    st.caption("① 지도 키 연결 → ② 기본 조건 조정 → ③ 실행 및 결과 확인")
 
     if "sidebar_tmap_app_key" not in st.session_state:
         st.session_state["sidebar_tmap_app_key"] = _default_tmap_key()
@@ -1096,21 +1108,19 @@ def main() -> None:
     scenario_files = sorted((ROOT_DIR / "scenarios").glob("*.yaml"))
 
     with st.sidebar:
-        st.header("실행 설정")
-        selected_config = st.selectbox(
-            "기본 Config",
-            config_files,
-            index=_preferred_config_index(config_files),
-            format_func=lambda p: p.name,
-            help="시뮬레이터 기본 파라미터 묶음입니다. 좌표계, 라우팅 백엔드, 차량 수, 보상값 같은 기본 실행 조건을 여기서 불러옵니다.",
-        )
-        selected_scenario = st.selectbox(
-            "기본 Scenario",
-            scenario_files,
-            index=_preferred_scenario_index(scenario_files),
-            format_func=lambda p: p.name,
-            help="실제로 재생할 요청 데이터입니다. 요청의 출발지, 도착지, 생성 시각, 최대 대기 시간이 이 시나리오에서 결정됩니다.",
-        )
+        st.header("시뮬레이션 설정")
+        advanced_settings = st.toggle("상세 설정", value=False, help="세부 환경·좌표·보상·프리셋·배치 실험을 표시합니다.")
+        with st.expander("실험 데이터", expanded=False):
+            selected_config = st.selectbox(
+                "기본 Config", config_files,
+                index=_preferred_config_index(config_files), format_func=lambda p: p.name,
+                help="좌표계·경로 계산·차량·보상의 기본 조건을 불러옵니다.",
+            )
+            selected_scenario = st.selectbox(
+                "기본 Scenario", scenario_files,
+                index=_preferred_scenario_index(scenario_files), format_func=lambda p: p.name,
+                help="재생할 요청의 출발지·도착지·생성 시각·대기 시간을 불러옵니다.",
+            )
 
     base_config = load_config(selected_config)
     base_scenario = load_scenario(selected_scenario)
@@ -1129,18 +1139,21 @@ def main() -> None:
             "정책",
             ["nearest", "eta", "random"],
             index=0,
+            format_func=_policy_label,
             help="배차 의사결정 규칙입니다. `nearest`는 가장 가까운 차량, `eta`는 예상 도착시간, `random`은 임의 선택을 사용합니다.",
         )
         tmap_app_key = st.text_input(
             "TMAP App Key",
             type="password",
             key="sidebar_tmap_app_key",
-            help="TMAP 라우팅 백엔드를 선택했을 때만 필요합니다. 지도 표시는 TMAP과 무관하게 OpenStreetMap을 사용합니다.",
+            help="TMAP 지도를 표시할 키입니다. 환경변수 또는 Streamlit Secrets의 TMAP_APP_KEY도 사용할 수 있습니다.",
         )
-        map_provider_options = ["pydeck", "coordinate", "openstreetmap"]
-        current_map_provider = str(base_config.get("visualization", {}).get("map_provider", "pydeck"))
+        if not tmap_app_key.strip():
+            st.caption("키를 입력하면 TMAP 지도를 연결합니다. 키 없이도 좌표 보기로 실험할 수 있습니다.")
+        map_provider_options = ["tmap", "coordinate", "openstreetmap", "pydeck"]
+        current_map_provider = str(base_config.get("visualization", {}).get("map_provider", "tmap"))
         if current_map_provider not in map_provider_options:
-            current_map_provider = "pydeck"
+            current_map_provider = "tmap"
         map_provider_source = selected_config.name
         if (
             st.session_state.get("dashboard_map_provider_source") != map_provider_source
@@ -1148,15 +1161,18 @@ def main() -> None:
         ):
             st.session_state["sidebar_map_provider"] = current_map_provider
             st.session_state["dashboard_map_provider_source"] = map_provider_source
-        map_render_mode = st.selectbox(
-            "지도 표시 방식",
-            map_provider_options,
-            key="sidebar_map_provider",
-            format_func=_map_provider_label,
-            help="기본은 PyDeck 오픈 지도입니다. 외부 타일 환경이 불안정하면 경량 좌표 맵으로 전환할 수 있습니다.",
-        )
-        active_environment_preset = render_environment_preset_loader()
-        active_condition_preset = render_condition_preset_loader()
+        with st.expander("지도 옵션", expanded=False):
+            map_render_mode = st.selectbox(
+                "지도 표시 방식", map_provider_options, key="sidebar_map_provider",
+                format_func=_map_provider_label,
+                help="TMAP 지도가 기본입니다. 키가 없거나 연결이 실패하면 좌표 보기를 제공합니다.",
+            )
+            st.caption("지도 표시와 경로 계산은 별개입니다. 기본 경로 계산은 로컬 ITS를 사용합니다.")
+        active_environment_preset = st.session_state.get("dashboard_active_environment_preset") or None
+        active_condition_preset = st.session_state.get("dashboard_active_condition_preset") or None
+        if advanced_settings:
+            active_environment_preset = render_environment_preset_loader()
+            active_condition_preset = render_condition_preset_loader()
 
     if active_environment_preset:
         try:
@@ -1188,31 +1204,43 @@ def main() -> None:
         ensure_ascii=False,
         sort_keys=True,
     )
-    config, scenario = build_editable_inputs(base_config, base_scenario, editor_source_signature)
+    if advanced_settings:
+        config, scenario = build_dashboard_inputs(base_config, base_scenario, editor_source_signature, True)
+    else:
+        with st.sidebar:
+            config, scenario = build_dashboard_inputs(base_config, base_scenario, editor_source_signature, False)
     config.setdefault("integrations", {})
     config["integrations"]["tmap_app_key"] = tmap_app_key.strip()
     config.setdefault("visualization", {})
     config["visualization"]["map_provider"] = map_render_mode
 
     with st.sidebar:
-        render_environment_preset_saver(config, detect_spatial_mode(config, scenario))
-        render_condition_preset_saver(config, scenario, detect_spatial_mode(config, scenario))
-        render_routing_status_panel(config, scenario, tmap_app_key)
-        batch_spec_to_run = render_batch_experiment_controls(
-            config,
-            scenario,
-            policy_name,
-            editor_source_signature,
-        )
+        batch_spec_to_run = None
+        if advanced_settings:
+            render_environment_preset_saver(config, detect_spatial_mode(config, scenario))
+            render_condition_preset_saver(config, scenario, detect_spatial_mode(config, scenario))
+            with st.expander("연결 진단", expanded=False):
+                render_routing_status_panel(config, scenario, tmap_app_key)
+            batch_spec_to_run = render_batch_experiment_controls(
+                config, scenario, policy_name, editor_source_signature,
+            )
 
+    run_requested = st.button("시뮬레이션 실행", type="primary", use_container_width=True)
     preview_env = MobilityEnv(config=config, scenario=scenario)
     initial_snapshot = build_initial_preview_snapshot(preview_env.timeline[0], scenario)
     spatial_mode = detect_spatial_mode(config, scenario)
 
     st.subheader("초기 상태")
-    render_initial_summary(config, scenario, initial_snapshot)
+    if advanced_settings:
+        render_initial_summary(config, scenario, initial_snapshot)
+    else:
+        render_compact_metric_cards([
+            ("차량", f"{config['vehicles']['count']}대"),
+            ("요청", f"{len(scenario.get('requests', []))}건"),
+            ("배차 정책", _policy_label(policy_name)),
+        ], columns_per_row=3)
     render_widget_alignment_spacer(8)
-    if spatial_mode == "latlon":
+    if spatial_mode == "latlon" and advanced_settings:
         map_col, control_col = st.columns([1.58, 0.82])
         with map_col:
             render_spatial_view(
@@ -1257,7 +1285,7 @@ def main() -> None:
         )
         st.rerun()
 
-    if st.button("시뮬레이션 실행", type="primary", use_container_width=True):
+    if run_requested:
         result = run_simulation(config, scenario, policy_name)
         st.session_state["dashboard_result"] = result
         st.session_state["dashboard_config"] = copy.deepcopy(config)
@@ -1277,7 +1305,10 @@ def main() -> None:
         result = st.session_state["dashboard_result"]
         st.divider()
         st.subheader("실행 결과")
-        active_config = st.session_state.get("dashboard_config", config)
+        active_config = copy.deepcopy(st.session_state.get("dashboard_config", config))
+        # 지도·키 변경은 이미 계산된 이동 결과에도 즉시 반영합니다.
+        active_config["visualization"] = copy.deepcopy(config["visualization"])
+        active_config["integrations"] = copy.deepcopy(config["integrations"])
         active_scenario = st.session_state.get("dashboard_scenario", scenario)
         render_result_summary(result, active_config, active_scenario)
 
@@ -1339,7 +1370,7 @@ def main() -> None:
             with st.expander("지도 참고 정보", expanded=False):
                 render_spatial_supporting_info(
                     frame,
-                    st.session_state.get("dashboard_config", config),
+                    active_config,
                     st.session_state.get("dashboard_scenario", scenario),
                     timeline=active_timeline,
                 )
@@ -1349,6 +1380,67 @@ def main() -> None:
         st.subheader("배치 실험 결과")
         render_batch_experiment_results(st.session_state["dashboard_batch_result"])
 
+
+
+def build_dashboard_inputs(base_config: dict, base_scenario: dict, source_signature: str, advanced: bool) -> tuple[dict, dict]:
+    """위젯이 숨겨져도 설정 스냅샷으로 간편/상세 전환 중 값을 보존합니다."""
+    saved = st.session_state.get("dashboard_editor_snapshot", {})
+    same_source = saved.get("source") == source_signature
+    config = copy.deepcopy(saved["config"] if same_source else base_config)
+    scenario = copy.deepcopy(saved["scenario"] if same_source else base_scenario)
+    if not same_source or saved.get("advanced") != advanced:
+        # Streamlit은 사라진 위젯의 상태를 정리하므로 진입 시 스냅샷에서 다시 채웁니다.
+        st.session_state.pop("dashboard_condition_editor_source", None)
+        for key in ("quick_vehicle_count", "quick_request_count", "quick_duration"):
+            st.session_state.pop(key, None)
+    if advanced:
+        config, scenario = build_editable_inputs(config, scenario, source_signature)
+    else:
+        config, scenario = build_quick_inputs(config, scenario)
+    st.session_state["dashboard_editor_snapshot"] = {
+        "source": source_signature, "advanced": advanced,
+        "config": copy.deepcopy(config), "scenario": copy.deepcopy(scenario),
+    }
+    return config, scenario
+
+
+def build_quick_inputs(config: dict, scenario: dict) -> tuple[dict, dict]:
+    """기본 조건만 표시하고 기존 개별 좌표·요청·보상은 그대로 유지합니다."""
+    spatial_mode = detect_spatial_mode(config, scenario)
+    simulation = config.setdefault("simulation", {})
+    simulation["space_mode"] = spatial_mode
+    vehicles = config.setdefault("vehicles", {})
+    st.markdown("**기본 조건**")
+    vehicle_count = int(st.number_input(
+        "차량 수", min_value=1, max_value=max(50, int(vehicles.get("count", 1))),
+        value=int(vehicles.get("count", 1)), key="quick_vehicle_count",
+    ))
+    old_count = max(1, len(scenario.get("requests", [])))
+    request_count = int(st.number_input(
+        "요청 수", min_value=1, max_value=max(200, old_count), value=old_count, key="quick_request_count",
+    ))
+    old_duration = int(simulation.get("max_time", 7200 if spatial_mode == "latlon" else 100))
+    duration = int(st.number_input(
+        "실행 시간 (초)" if spatial_mode == "latlon" else "실행 길이 (단계)",
+        min_value=1, max_value=max(86400 if spatial_mode == "latlon" else 500, old_duration),
+        value=old_duration, key="quick_duration", help="7200초는 2시간입니다.",
+    ))
+    simulation["max_time"] = duration
+    if int(vehicles.get("available_time", old_duration)) == old_duration:
+        vehicles["available_time"] = duration
+    positions = shared_ensure_vehicle_positions(config, vehicle_count=vehicle_count, spatial_mode=spatial_mode)
+    regenerate = st.button("요청 다시 생성", key="quick_regenerate", use_container_width=True)
+    if regenerate or request_count != len(scenario.get("requests", [])):
+        generation = scenario.setdefault("metadata", {}).setdefault("request_generation", {})
+        seed = int(generation.get("seed", simulation.get("random_seed", 42)))
+        if regenerate:
+            seed += 1
+        radius = float(generation.get("radius", _default_request_generation_radius(spatial_mode)))
+        scenario["requests"] = generate_random_requests(positions, request_count, spatial_mode, config, seed, radius)
+        generation.update({"seed": seed, "radius": radius, "request_count": request_count})
+    if spatial_mode == "latlon":
+        st.caption(f"실행 {duration / 60:g}분 · 경로: {_provider_label(simulation.get('routing_provider', 'local_its'))}")
+    return config, scenario
 
 
 def build_editable_inputs(base_config: dict, base_scenario: dict, source_signature: str) -> tuple[dict, dict]:
@@ -1393,7 +1485,7 @@ def build_editable_inputs(base_config: dict, base_scenario: dict, source_signatu
         config["visualization"].setdefault("map_provider", "pydeck")
         _sync_local_its_speed_profile_state(source_signature, config)
 
-    with st.expander("환경 설정", expanded=True):
+    with st.expander("환경 설정", expanded=False):
         _render_section_description("시뮬레이션 시간 축, 라우팅 백엔드, 교통 반영 방식, 도로망 데이터셋 같은 전역 실행 조건을 설정합니다.")
         if spatial_mode == "grid":
             col1, col2, col3 = st.columns(3)
@@ -1606,7 +1698,7 @@ def build_editable_inputs(base_config: dict, base_scenario: dict, source_signatu
                 "`로컬 ITS`에서는 24시간 속도표를 켰을 때 이 절대 시각의 시(hour)를 읽어 적용 속도가 바뀌고, 끄면 고정 평균 속도를 사용합니다."
             )
 
-    with st.expander("차량 설정", expanded=True):
+    with st.expander("차량 설정", expanded=False):
         _render_section_description(
             f"차량 수, 용량, 가용 시간과 시작 위치를 설정합니다. lat/lon 모드 기본 시작점은 `{DEFAULT_LATLON_START_LABEL}`이며, 차량별로 직접 수정할 수 있습니다."
         )
@@ -1792,7 +1884,7 @@ def build_editable_inputs(base_config: dict, base_scenario: dict, source_signatu
         config["vehicles"]["initial_positions"] = edited_positions
         st.session_state["dashboard_vehicle_count"] = int(vehicle_count)
 
-    with st.expander("요청 설정", expanded=True):
+    with st.expander("요청 설정", expanded=False):
         _render_section_description("요청 수와 생성 반경만 지정하면, 현재 차량 시작 위치 근방에서 출발지/도착지, 생성 시각, 최대 대기 시간을 겹치지 않게 랜덤 생성합니다. lat/lon 모드에서는 생성 좌표가 도로망 밖이면 가까운 로컬 ITS 도로 노드로 스냅합니다.")
         available_request_count = len(scenario.get("requests", []))
         existing_request_count = max(1, available_request_count)
@@ -2008,8 +2100,12 @@ def run_simulation(config: dict, scenario: dict, policy_name: str) -> dict:
 
 
 def make_run_signature(config: dict, scenario: dict, policy_name: str) -> str:
+    simulation_config = copy.deepcopy(config)
+    simulation_config.pop("visualization", None)
+    if simulation_config.get("simulation", {}).get("routing_provider") != "tmap":
+        simulation_config.pop("integrations", None)
     payload = {
-        "config": config,
+        "config": simulation_config,
         "scenario": scenario,
         "policy_name": policy_name,
     }
@@ -2498,7 +2594,7 @@ def render_routing_status_panel(config: dict, scenario: dict, tmap_app_key: str)
         return
 
     if not key_present:
-        st.warning("TMAP 라우팅 백엔드를 쓰려면 `TMAP App Key`가 필요합니다. 지도 표시는 OpenStreetMap으로 유지됩니다.")
+        st.warning("TMAP 경로 계산에는 App Key가 필요합니다. 지도 연결과 경로 계산 권한을 각각 확인하세요.")
 
     diagnosis_signature = make_run_signature(config, scenario, "__diagnose__")
     if st.button(
@@ -4093,6 +4189,9 @@ def render_spatial_view(
 ) -> None:
     if detect_spatial_mode(config, scenario) == "latlon":
         provider = config.get("visualization", {}).get("map_provider", "coordinate")
+        if provider == "tmap":
+            render_tmap_map(frame, config, compact=compact, timeline=timeline, show_supporting_info=show_supporting_info)
+            return
         if provider == "coordinate":
             render_coordinate_view(frame, compact=compact, timeline=timeline, show_supporting_info=show_supporting_info)
             return
@@ -4107,7 +4206,7 @@ def render_spatial_view(
 def get_tmap_app_key(config: dict) -> str:
     return (
         config.get("integrations", {}).get("tmap_app_key")
-        or os.environ.get("TMAP_APP_KEY")
+        or _default_tmap_key()
         or ""
     ).strip()
 
@@ -4463,6 +4562,9 @@ def render_spatial_supporting_info(
         return
     payload = build_map_payload(frame, timeline=timeline)
     provider = config.get("visualization", {}).get("map_provider", "coordinate")
+    if provider == "tmap":
+        render_map_supporting_info(payload, "TMAP 기반 지도입니다. 차량·요청 출발/도착·이동 경로를 함께 표시합니다.")
+        return
     if provider == "coordinate":
         render_map_supporting_info(
             payload,
@@ -5019,6 +5121,31 @@ def build_coordinate_svg(payload: dict, compact: bool = False, include_intro: bo
       <text x="{width - 180}" y="{height - 8}" font-size="11" fill="#64748b">lat {min_lat:.5f} ~ {max_lat:.5f}</text>
     </svg>
     """
+
+
+def render_tmap_map(
+    frame: dict,
+    config: dict,
+    compact: bool = False,
+    timeline: list[dict] | None = None,
+    show_supporting_info: bool = True,
+) -> None:
+    payload = build_map_payload(frame, timeline=timeline)
+    if not any(payload[name] for name in ("vehicle_points", "vehicle_start_points", "request_origin_points", "request_destination_points")):
+        st.info("지도에 표시할 좌표 데이터가 없습니다.")
+        return
+    app_key = get_tmap_app_key(config)
+    if not app_key:
+        st.info("TMAP App Key를 입력하면 실제 지도가 표시됩니다. 현재는 좌표 보기입니다.")
+        render_coordinate_view(frame, compact=compact, timeline=timeline, show_supporting_info=show_supporting_info)
+        return
+    fallback_svg = build_coordinate_svg(payload, compact=compact, include_intro=False)
+    components.html(
+        build_tmap_html(payload, app_key, fallback_svg, compact),
+        height=440 if compact else 620, scrolling=False,
+    )
+    if show_supporting_info:
+        render_map_supporting_info(payload, "TMAP 지도 · 차량·요청·이동 경로. 지도와 경로 계산 서비스는 별도로 설정합니다.", compact=compact)
 
 
 def render_openstreetmap_map(
