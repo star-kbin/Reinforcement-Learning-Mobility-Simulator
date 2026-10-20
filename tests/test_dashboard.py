@@ -21,6 +21,28 @@ class DashboardTests(unittest.TestCase):
     def assertHealthy(self, app):
         self.assertFalse(app.exception, [error.message for error in app.exception])
 
+    def test_osm_html_initializes_map_before_markers_and_encodes_data(self):
+        from unittest.mock import patch
+        from dashboard.app import render_openstreetmap_map
+        from simulator.env import MobilityEnv
+        from simulator.scenarios.loader import load_config, load_scenario
+        env = MobilityEnv(load_config(ROOT / "configs/base_latlon.yaml"), load_scenario(ROOT / "scenarios/scenario_dongjak_history.yaml"))
+        with patch("dashboard.app.components.html") as component:
+            render_openstreetmap_map(env.timeline[0], show_supporting_info=False)
+        html = component.call_args.args[0]
+        self.assertLess(html.index(".setView([37.501"), html.index("marker.bringToFront()"))
+        self.assertIn("https://tile.openstreetmap.org/", html)
+        self.assertIn("https://www.openstreetmap.org/copyright", html)
+        self.assertIn("showFallback", html)
+        payload = {"vehicle_points": [{"coordinates": [127, 37.5], "label": "</script>"}],
+                   "vehicle_start_points": [], "request_origin_points": [], "request_destination_points": []}
+        with patch("dashboard.app.build_map_payload", return_value=payload), patch("dashboard.app.build_coordinate_svg", return_value="<svg></svg>"), patch("dashboard.app.components.html") as component:
+            render_openstreetmap_map({}, show_supporting_info=False)
+        html = component.call_args.args[0]
+        encoded = re.search(r"const payload = (.*?);", html)[1]
+        self.assertNotIn("</script>", encoded)
+        self.assertEqual(json.loads(encoded)["vehicle_points"][0]["label"], "</script>")
+
     def test_default_simple_mode_and_no_key(self):
         app = self.app()
         self.assertEqual([control.label for control in app.number_input], ["차량 수", "요청 수", "실행 시간 (초)"])
