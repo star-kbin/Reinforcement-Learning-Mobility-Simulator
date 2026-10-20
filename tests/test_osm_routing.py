@@ -31,6 +31,18 @@ class OSMRoutingTests(unittest.TestCase):
         cached.path.clear()
         self.assertTrue(service.plan_route(plan.path[0],plan.path[-1],1,30).path)
 
+    def test_default_station_position_and_generator_match_configs(self):
+        from simulator.scenarios.generator import DEFAULT_LATLON_START, ensure_vehicle_positions
+        self.assertEqual(DEFAULT_LATLON_START,(37.513620,126.941570))
+        for name in ("base_latlon.yaml","dongjak_history_latlon.yaml"):
+            config=load_config(ROOT/"configs"/name)
+            self.assertEqual(config["vehicles"]["initial_positions"][0],list(DEFAULT_LATLON_START))
+        config={"simulation":{"space_mode":"latlon"},"vehicles":{"count":1}}
+        self.assertEqual(ensure_vehicle_positions(config,vehicle_count=1,spatial_mode="latlon"),[list(DEFAULT_LATLON_START)])
+        route=OSMRoutingService({}).plan_route(DEFAULT_LATLON_START,(37.5032574,126.9607815),1,30)
+        self.assertEqual(route.source,"osm_offline")
+        self.assertGreater(route.metadata["road_distance_meters"],0)
+
     def test_outside_coverage_never_becomes_straight_line(self):
         with self.assertRaisesRegex(OSMRoutingError,'범위 밖'):
             OSMRoutingService({}).plan_route((35.1,129.1),(37.5,127),1,30)
