@@ -6,7 +6,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../dashboard/tmap_map.js'), 'utf8');
 
-function setup({sdk = true, key = 'test&key=한글'} = {}) {
+function setup({sdk = true, key = 'test&key=한글', mapFails = false} = {}) {
   const elements = {};
   const timers = new Set();
   const scripts = [];
@@ -22,7 +22,10 @@ function setup({sdk = true, key = 'test&key=한글'} = {}) {
     active_routes:[{path:[[127.03,37.49],[127.04,37.5]],color_hex:'#2563eb'}]
   }});
   class Map {
-    constructor(id, options) { this.options=options; maps.push(this); }
+    constructor(id, options) {
+      if (mapFails) throw new Error('test');
+      this.options=options; maps.push(this);
+    }
     fitBounds(bounds) { this.bounds=bounds; }
     resize() {}
     destroy() { this.destroyed=true; }
@@ -31,7 +34,8 @@ function setup({sdk = true, key = 'test&key=한글'} = {}) {
   class LatLngBounds { constructor() { this.points=[]; } extend(p) { this.points.push(p); } }
   class Marker { constructor(options) { markers.push(options); } setMap() {} }
   class Polyline { constructor(options) { lines.push(options); } setMap() {} }
-  const window = {addEventListener() {}};
+  let reloaded = false;
+  const window = {addEventListener() {}, location:{reload(){reloaded=true;}}};
   if (sdk) window.Tmapv2 = {Map, LatLng, LatLngBounds, Marker, Polyline, Size:class{}, Point:class{}};
   const document = {getElementById:id=>elements[id],
     createElement() { return {remove() { this.removed=true; }}; },
@@ -39,13 +43,14 @@ function setup({sdk = true, key = 'test&key=한글'} = {}) {
   vm.runInNewContext(source, {window, document, URLSearchParams,
     setTimeout(callback) { timers.add(callback); return callback; },
     clearTimeout(callback) { timers.delete(callback); }});
-  return {elements, maps, markers, lines, timers, scripts};
+  return {elements, maps, markers, lines, timers, scripts, wasReloaded:()=>reloaded};
 }
 
 test('좌표 순서·차량/요청 마커·경로·범위', () => {
   const {maps,markers,lines} = setup();
   assert.equal(maps[0].options.center.lat,37.49);
   assert.equal(maps[0].options.center.lon,127.03);
+  assert.equal(maps[0].options.height,'340px');
   assert.equal(markers.length,2);
   assert.equal(lines.length,1);
   assert.equal(maps[0].bounds.points.length,2);
@@ -68,15 +73,19 @@ test('시간 초과 시 좌표 보기로 전환', () => {
   assert.equal(elements.retry.hidden,false);
   assert.ok(elements.notice.textContent.includes('권한'));
 });
-test('SDK 로드 실패와 다시 연결', () => {
-  const {elements,scripts} = setup({sdk:false});
-  assert.equal(new URL(scripts[0].src).searchParams.get('appKey'),'test&key=한글');
-  scripts[0].onerror();
+test('SDK 로드 실패 진단과 문서 재로딩', () => {
+  const {elements,scripts,wasReloaded} = setup({sdk:false});
   assert.equal(elements.fallback.hidden,false);
+  assert.ok(elements.notice.textContent.includes('SDK 로드 실패'));
+  assert.ok(elements.notice.textContent.includes('IP'));
   elements.retry.listeners.click();
-  assert.equal(scripts.length,2);
-  assert.equal(scripts[0].removed,true);
-  assert.equal(elements.fallback.hidden,true);
+  assert.equal(wasReloaded(),true);
+  assert.equal(scripts.length,0);
+});
+test('지도 생성 오류와 인증 오류를 구분', () => {
+  const {elements} = setup({mapFails:true});
+  assert.ok(elements.notice.textContent.includes('지도 생성 실패'));
+  assert.ok(!elements.notice.textContent.includes('test&key'));
 });
 test('키가 없을 때 외부 SDK를 호출하지 않음', () => {
   const {elements,scripts} = setup({key:'',sdk:false});
