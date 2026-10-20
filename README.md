@@ -8,12 +8,12 @@
 
 | 항목 | 링크 | 상태 |
 | --- | --- | --- |
-| **Streamlit Cloud 온라인 데모** | [Streamlit Community Cloud에서 배포 및 앱 관리](https://share.streamlit.io/) | **공개 앱 URL 미확인 — 최초 배포 후 실제 주소 연결 필요** |
+| **Streamlit Cloud 온라인 데모** | [🚀 OSM 모빌리티 시뮬레이터 실행](https://reinforcement-learning-mobility-simulator.streamlit.app/) | 공개 배포 URL 등록 |
 | **최신 OSM 버전 소스코드** | [dashboard/app.py](dashboard/app.py) | GitHub에서 확인 가능 |
 | **Streamlit 배포 가이드** | [배포 설정 및 점검 방법](docs/streamlit_cloud.md) | 안내 문서 |
 | **OSM 지도 데이터** | [데이터 범위 및 출처](data/osm/README.md) | GitHub에서 확인 가능 |
 
-**중요:** 위 Streamlit Community Cloud 링크는 앱 실행 주소가 아닌 **배포·관리 페이지**입니다. 최초 배포가 완료되면 Streamlit에서 발급된 `https://...streamlit.app` 주소로 첫 번째 링크를 교체하세요. 주소를 확인하기 전에는 미배포 앱을 실행 가능하다고 표시하지 않습니다.
+**온라인 데모:** [OSM 모빌리티 시뮬레이터 바로 실행](https://reinforcement-learning-mobility-simulator.streamlit.app/) · [Streamlit Cloud 앱 관리](https://share.streamlit.io/)
 
 ### 처음 방문한 분들을 위한 사용 순서
 
