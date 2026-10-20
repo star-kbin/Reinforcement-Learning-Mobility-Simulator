@@ -10,6 +10,7 @@
   const fit = document.getElementById("fit");
   let map = null;
   let timer = null;
+  let sdkPoll = null;
   let attempt = 0;
   let failed = false;
   const markers = [];
@@ -48,7 +49,14 @@
   function fail(stage = "tiles") {
     failed = true;
     clearTimeout(timer);
-    status.textContent = "TMAP 지도를 불러오지 못했습니다";
+    clearTimeout(sdkPoll);
+    const titles = {
+      key: "TMAP App Key가 비어 있습니다",
+      sdk: "TMAP SDK 준비 대기 시간이 초과되었습니다",
+      init: "TMAP 지도 생성 중 오류가 발생했습니다",
+      tiles: "TMAP 배경 지도 응답을 확인하지 못했습니다",
+    };
+    status.textContent = titles[stage] || titles.tiles;
     const messages = {
       key: "키가 비어 있습니다. 앱 왼쪽에 TMAP App Key를 입력하세요.",
       sdk: "지도 SDK 로드 실패: 지도 서비스 인증·접근 허용 IP·네트워크 차단을 확인하세요.",
@@ -137,6 +145,7 @@
   function start() {
     const currentAttempt = ++attempt;
     clearTimeout(timer);
+    clearTimeout(sdkPoll);
     failed = false;
     markers.splice(0).forEach(marker => marker.setMap(null));
     lines.splice(0).forEach(line => line.setMap(null));
@@ -148,13 +157,27 @@
     retry.hidden = true;
     fit.disabled = true;
     if (!appKey.trim()) { fail("key"); return; }
-    timer = setTimeout(() => fail("tiles"), 15000);
-    initialize(currentAttempt);
+    status.textContent = "TMAP SDK 준비 중…";
+    // 최초 로더의 HTTP 200/onload와 하위 SDK의 준비 완료는 시점이 다를 수 있습니다.
+    timer = setTimeout(() => fail("sdk"), 15000);
+    function waitForSdk() {
+      if (currentAttempt !== attempt || failed) return;
+      if (window.Tmapv2 && typeof window.Tmapv2.Map === "function") {
+        clearTimeout(timer);
+        status.textContent = "지도 연결 중…";
+        timer = setTimeout(() => fail("tiles"), 15000);
+        initialize(currentAttempt);
+      } else {
+        sdkPoll = setTimeout(waitForSdk, 100);
+      }
+    }
+    waitForSdk();
   }
   toggle.addEventListener("click", () => showCoordinates(fallback.hidden));
   // iframe의 원본 srcdoc를 다시 파싱해 SDK의 document.write 경로도 재시도합니다.
   retry.addEventListener("click", () => window.location.reload());
   fit.addEventListener("click", fitBounds);
   window.addEventListener("resize", () => { if (map && !mapElement.hidden) map.resize(); });
+  window.addEventListener("beforeunload", () => { clearTimeout(timer); clearTimeout(sdkPoll); });
   start();
 })();
