@@ -3,7 +3,9 @@
 import json
 import re
 import unittest
+from html import unescape
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from streamlit.testing.v1 import AppTest
 from dashboard.tmap_view import build_tmap_html
@@ -26,6 +28,15 @@ class DashboardTests(unittest.TestCase):
         self.assertNotIn(key, html)
         encoded = re.search(r'<script id="tmap-data" type="application/json">(.*?)</script>', html, re.S)[1]
         self.assertEqual(json.loads(encoded)["appKey"], key)
+
+    def test_sdk_is_parser_loaded_before_map_initialization(self):
+        key = 'test&key="한글'
+        html = build_tmap_html({}, key, "<svg></svg>")
+        sdk = re.search(r'<script src="([^"]+)"></script>', html)
+        self.assertIsNotNone(sdk)
+        self.assertEqual(parse_qs(urlparse(unescape(sdk[1])).query)["appKey"], [key])
+        self.assertLess(sdk.end(), html.index('const { payload, appKey, compact }'))
+        self.assertNotIn('document.createElement("script")', html)
 
     def test_default_simple_mode_and_no_key(self):
         app = self.app()
