@@ -5097,12 +5097,9 @@ def render_openstreetmap_map(
               pointCandidates.push(point.coordinates);
             }}
 
-            payload.request_pairs.forEach(item => addPath(item.path, {{
-              color: "#94a3b8",
-              weight: 2,
-              opacity: 0.7,
-              dashArray: "6 6"
-            }}, "요청 " + (item.request_id || "")));
+            // O/D를 잇는 직선은 실제 주행 경로가 아니므로 OSM 지도에 그리지 않습니다.
+            // 요청 출발지/도착지는 각각 마커로 표시하고, 실제 차량 이동은
+            // actual_vehicle_paths 및 OSM active_routes 폴리라인으로만 표시합니다.
             payload.road_network_paths.forEach(line => addPath(line.path, {{
               color: line.color_hex,
               weight: 6,
