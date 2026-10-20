@@ -28,9 +28,6 @@ from typing import Any, Callable
 ROOT_DIR = Path(__file__).resolve().parents[1]
 CONDITION_PRESET_DIR = ROOT_DIR / "results" / "condition_presets"
 ENVIRONMENT_PRESET_DIR = ROOT_DIR / "results" / "environment_presets"
-DEFAULT_LATLON_START_LABEL = "서울특별시 강남구 강남대로 318"
-DEFAULT_LATLON_START = (37.4915254, 127.0310762)
-DEFAULT_LATLON_DESTINATION_FALLBACK = (37.4922254, 127.0323762)
 DEFAULT_LATLON_REQUEST_COUNT = 4
 DASHBOARD_AUTOPLAY_SPEED_OPTIONS = [1, 2, 4, 8, 10, 50, 100]
 DASHBOARD_AUTOPLAY_BASE_SECONDS = 10
@@ -46,6 +43,9 @@ from simulator.local_its_defaults import (
 )
 from simulator.policies.factory import build_policy
 from simulator.scenarios.generator import (
+    DEFAULT_LATLON_START_LABEL,
+    DEFAULT_LATLON_START,
+    DEFAULT_LATLON_DESTINATION_FALLBACK,
     ensure_vehicle_positions as shared_ensure_vehicle_positions,
     generate_random_requests as shared_generate_random_requests,
 )
@@ -1291,6 +1291,9 @@ def main() -> None:
         frame = timeline[selected_frame]
 
         active_timeline = timeline[: selected_frame + 1]
+        if "map_view_bounds" not in result:
+            result["map_view_bounds"] = build_map_view_bounds(timeline)
+        fixed_view_bounds = result["map_view_bounds"]
         if detect_spatial_mode(active_config, active_scenario) == "latlon":
             map_col, label_col = st.columns([1.55, 0.55])
             with map_col:
@@ -1300,6 +1303,7 @@ def main() -> None:
                     active_scenario,
                     compact=False,
                     timeline=active_timeline,
+                    view_bounds=fixed_view_bounds,
                     show_supporting_info=False,
                 )
             with label_col:
@@ -1311,6 +1315,7 @@ def main() -> None:
                 active_scenario,
                 compact=False,
                 timeline=active_timeline,
+                view_bounds=fixed_view_bounds,
                 show_supporting_info=False,
             )
         render_timeline_scrubber(frame, timeline, active_config, active_scenario)
@@ -1552,7 +1557,7 @@ def build_editable_inputs(base_config: dict, base_scenario: dict, source_signatu
         )
         edited_positions: list[list[float]] = []
         st.caption(
-            "기본 시작 위치는 강남 기준 기본 좌표로 채워집니다. 차량 수를 늘리면 마지막으로 입력한 좌표를 복사해 새 차량 시작 위치에 사용합니다."
+            "기본 시작 위치는 노량진역 앞 기본 좌표로 채워집니다. 차량 수를 늘리면 마지막으로 입력한 좌표를 복사해 새 차량 시작 위치에 사용합니다."
             if spatial_mode == "latlon"
             else "기본 시작 위치는 첫 번째 수요 발생 위치로 채워집니다. 차량 수를 늘리면 마지막으로 입력한 좌표를 복사해 새 차량 시작 위치에 사용합니다."
         )
@@ -3759,9 +3764,10 @@ def render_spatial_view(
     show_legend: bool = True,
     timeline: list[dict] | None = None,
     show_supporting_info: bool = True,
+    view_bounds: list[list[float]] | None = None,
 ) -> None:
     if detect_spatial_mode(config, scenario) == "latlon":
-        render_openstreetmap_map(frame, compact=compact, timeline=timeline, show_supporting_info=show_supporting_info)
+        render_openstreetmap_map(frame, compact=compact, timeline=timeline, show_supporting_info=show_supporting_info, view_bounds=view_bounds)
         return
     render_grid(frame, config, compact=compact, show_legend=show_legend)
 
@@ -4164,6 +4170,42 @@ def dedupe_coordinates(path: list[list[float]]) -> list[list[float]]:
     return deduped
 
 
+def build_map_view_bounds(timeline: list[dict]) -> list[list[float]] | None:
+    """전체 에피소드의 차량·요청·우회 경로를 포함하는 고정 지도 범위 (lat, lon)."""
+    min_lat = min_lon = math.inf
+    max_lat = max_lon = -math.inf
+
+    def include(point: list | tuple) -> None:
+        nonlocal min_lat, min_lon, max_lat, max_lon
+        if not isinstance(point, (list, tuple)) or len(point) < 2:
+            return
+        lat, lon = float(point[0]), float(point[1])
+        if not (math.isfinite(lat) and math.isfinite(lon)):
+            return
+        min_lat, max_lat = min(min_lat, lat), max(max_lat, lat)
+        min_lon, max_lon = min(min_lon, lon), max(max_lon, lon)
+
+    for snapshot in timeline:
+        for vehicle in snapshot.get("vehicles", []):
+            include(vehicle.get("position", []))
+            for point in vehicle.get("active_route_path", []):
+                include(point)
+            for field in ("route_history_paths", "actual_route_paths"):
+                for path in vehicle.get(field, []):
+                    for point in path:
+                        include(point)
+        for request in snapshot.get("requests", []):
+            include(request.get("origin", []))
+            include(request.get("destination", []))
+    if min_lat == math.inf:
+        return None
+    # 단일 위치나 좁은 경로에서도 지나친 확대를 방지합니다.
+    lat_margin = max((max_lat - min_lat) * 0.06, 0.0005)
+    lon_margin = max((max_lon - min_lon) * 0.06, 0.0005)
+    return [[min_lat - lat_margin, min_lon - lon_margin],
+            [max_lat + lat_margin, max_lon + lon_margin]]
+
+
 def build_map_payload(frame: dict, timeline: list[dict] | None = None) -> dict:
     vehicle_ids = [str(vehicle.get("vehicle_id")) for vehicle in frame.get("vehicles", [])]
     if timeline:
@@ -4491,8 +4533,11 @@ def build_coordinate_svg(payload: dict, compact: bool = False, include_intro: bo
     coords = [point["coordinates"] for point in all_points]
     lons = [coord[0] for coord in coords]
     lats = [coord[1] for coord in coords]
-    min_lon, max_lon = min(lons), max(lons)
-    min_lat, max_lat = min(lats), max(lats)
+    if payload.get("view_bounds"):
+        (min_lat, min_lon), (max_lat, max_lon) = payload["view_bounds"]
+    else:
+        min_lon, max_lon = min(lons), max(lons)
+        min_lat, max_lat = min(lats), max(lats)
     lon_span = max(max_lon - min_lon, 1e-6)
     lat_span = max(max_lat - min_lat, 1e-6)
 
@@ -4655,8 +4700,10 @@ def render_openstreetmap_map(
     compact: bool = False,
     timeline: list[dict] | None = None,
     show_supporting_info: bool = True,
+    view_bounds: list[list[float]] | None = None,
 ) -> None:
     payload = build_map_payload(frame, timeline=timeline)
+    payload["view_bounds"] = view_bounds
     all_points = (
         payload["vehicle_points"]
         + payload["vehicle_start_points"]
@@ -4856,10 +4903,24 @@ def render_openstreetmap_map(
           if (!window.L) {{
             showFallback("Leaflet 리소스를 불러오지 못해 좌표 검증 뷰로 전환했습니다.");
           }} else {{
+            const fixedCamera = Boolean(payload.view_bounds);
             const map = L.map("{map_div_id}", {{
-              zoomControl: true,
-              scrollWheelZoom: true
-            }}).setView([37.501, 126.985], 13);
+              zoomControl: !fixedCamera,
+              scrollWheelZoom: !fixedCamera,
+              dragging: !fixedCamera,
+              touchZoom: !fixedCamera,
+              doubleClickZoom: !fixedCamera,
+              boxZoom: !fixedCamera,
+              keyboard: !fixedCamera,
+              zoomAnimation: false,
+              fadeAnimation: false,
+              markerZoomAnimation: false
+            }});
+            if (fixedCamera) {{
+              map.fitBounds(payload.view_bounds, {{ padding: [40, 40], maxZoom: 16, animate: false }});
+            }} else {{
+              map.setView([{DEFAULT_LATLON_START[0]}, {DEFAULT_LATLON_START[1]}], 13);
+            }}
 
             const tileLayer = L.tileLayer("https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
               maxZoom: 19,
@@ -5099,13 +5160,13 @@ def render_openstreetmap_map(
             payload.request_origin_points.forEach(point => addDivMarker(point));
             payload.request_destination_points.forEach(point => addDivMarker(point));
 
-            if (pointCandidates.length > 1) {{
+            if (!fixedCamera && pointCandidates.length > 1) {{
               const bounds = L.latLngBounds(pointCandidates.map(p => [p[1], p[0]]));
               map.fitBounds(bounds, {{ padding: [24, 24] }});
-            }} else if (pointCandidates.length === 1) {{
+            }} else if (!fixedCamera && pointCandidates.length === 1) {{
               map.setView([pointCandidates[0][1], pointCandidates[0][0]], {12 if compact else 13});
-            }} else {{
-              map.setView([37.4915254, 127.0310762], 13);
+            }} else if (!fixedCamera) {{
+              map.setView([{DEFAULT_LATLON_START[0]}, {DEFAULT_LATLON_START[1]}], 13);
             }}
           }}
         </script>
