@@ -150,7 +150,7 @@ def build_config(requests: list[dict], rows: list[dict], vehicle_count: int, tim
     return {
         "simulation": {
             "space_mode": "latlon",
-            "routing_provider": "local_its",
+            "routing_provider": "osm",
             "max_time": max_created_at + max_trip + (15 * 60),
             "time_step": time_step,
             "traffic_update_interval": max(300, time_step),
@@ -186,10 +186,7 @@ def build_config(requests: list[dict], rows: list[dict], vehicle_count: int, tim
             "max_visible_requests": 10,
         },
         "visualization": {
-            "map_provider": "pydeck",
-        },
-        "integrations": {
-            "tmap_app_key": "",
+            "map_provider": "openstreetmap",
         },
     }
 

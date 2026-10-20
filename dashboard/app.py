@@ -21,7 +21,6 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 import uuid
 
-import pydeck as pdk
 import streamlit as st
 import streamlit.components.v1 as components
 from typing import Any, Callable
@@ -38,7 +37,6 @@ DASHBOARD_AUTOPLAY_BASE_SECONDS = 10
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from dashboard.tmap_view import build_tmap_html
 from simulator.env import MobilityEnv
 from simulator.evaluation.runner import run_episode
 from simulator.local_its_defaults import (
@@ -56,14 +54,6 @@ from simulator.scenarios.loader import load_config, load_scenario
 KST = timezone(timedelta(hours=9))
 
 
-def _default_tmap_key() -> str:
-    environment_key = os.environ.get("TMAP_APP_KEY", "").strip()
-    if environment_key:
-        return environment_key
-    try:
-        return str(st.secrets.get("TMAP_APP_KEY", "")).strip()
-    except (FileNotFoundError, st.errors.StreamlitSecretNotFoundError):
-        return ""
 
 
 def _current_day_start_text() -> str:
@@ -125,8 +115,8 @@ def _preferred_scenario_index(scenario_files: list[Path]) -> int:
 
 def _provider_label(provider: str) -> str:
     labels = {
-        "local_its": "로컬 ITS 도로망",
-        "tmap": "TMAP API",
+        "local_its": "OSM 도로망 (이전 설정 자동 전환)",
+        "osm": "OSM 도로망",
         "simple": "직선 기준",
     }
     return labels.get(provider, provider)
@@ -138,7 +128,7 @@ def _policy_label(policy: str) -> str:
 
 def _map_provider_label(provider: str) -> str:
     labels = {
-        "tmap": "TMAP 지도 (App Key)",
+
         "openstreetmap": "OpenStreetMap",
         "coordinate": "경량 좌표 맵",
         "pydeck": "PyDeck 오픈 지도",
@@ -806,7 +796,7 @@ def render_environment_preset_loader() -> str | None:
         "저장된 환경 프리셋",
         options,
         key="dashboard_environment_preset_select",
-        help="불러오면 시뮬레이션 시작 시각, 시간 간격, 라우팅 백엔드, ITS 속도 설정 같은 환경 설정이 편집기에 채워집니다.",
+        help="불러오면 시뮬레이션 시작 시각, 시간 간격, 라우팅 백엔드, 평균 속도 설정 같은 환경 설정이 편집기에 채워집니다.",
     )
     col1, col2 = st.columns(2)
     with col1:
@@ -1099,10 +1089,8 @@ def render_batch_experiment_controls(
 def main() -> None:
     st.set_page_config(page_title="Reinforcement Learning Mobility Simulator", layout="wide")
     st.title("모빌리티 시뮬레이터")
-    st.caption("① 지도 키 연결 → ② 기본 조건 조정 → ③ 실행 및 결과 확인")
+    st.caption("① 기본 조건 조정 → ② 실행 → ③ OSM 지도와 결과 확인")
 
-    if "sidebar_tmap_app_key" not in st.session_state:
-        st.session_state["sidebar_tmap_app_key"] = _default_tmap_key()
 
     config_files = sorted((ROOT_DIR / "configs").glob("*.yaml"))
     scenario_files = sorted((ROOT_DIR / "scenarios").glob("*.yaml"))
@@ -1142,32 +1130,7 @@ def main() -> None:
             format_func=_policy_label,
             help="배차 의사결정 규칙입니다. `nearest`는 가장 가까운 차량, `eta`는 예상 도착시간, `random`은 임의 선택을 사용합니다.",
         )
-        tmap_app_key = st.text_input(
-            "TMAP App Key",
-            type="password",
-            key="sidebar_tmap_app_key",
-            help="TMAP 지도를 표시할 키입니다. 환경변수 또는 Streamlit Secrets의 TMAP_APP_KEY도 사용할 수 있습니다.",
-        )
-        if not tmap_app_key.strip():
-            st.caption("키를 입력하면 TMAP 지도를 연결합니다. 키 없이도 좌표 보기로 실험할 수 있습니다.")
-        map_provider_options = ["tmap", "coordinate", "openstreetmap", "pydeck"]
-        current_map_provider = str(base_config.get("visualization", {}).get("map_provider", "tmap"))
-        if current_map_provider not in map_provider_options:
-            current_map_provider = "tmap"
-        map_provider_source = selected_config.name
-        if (
-            st.session_state.get("dashboard_map_provider_source") != map_provider_source
-            or st.session_state.get("sidebar_map_provider") not in map_provider_options
-        ):
-            st.session_state["sidebar_map_provider"] = current_map_provider
-            st.session_state["dashboard_map_provider_source"] = map_provider_source
-        with st.expander("지도 옵션", expanded=False):
-            map_render_mode = st.selectbox(
-                "지도 표시 방식", map_provider_options, key="sidebar_map_provider",
-                format_func=_map_provider_label,
-                help="TMAP 지도가 기본입니다. 키가 없거나 연결이 실패하면 좌표 보기를 제공합니다.",
-            )
-            st.caption("지도 표시와 경로 계산은 별개입니다. 기본 경로 계산은 로컬 ITS를 사용합니다.")
+        st.caption("지도: OpenStreetMap · 경로: 내장 OSM 도로망 · API 키 없이 사용")
         active_environment_preset = st.session_state.get("dashboard_active_environment_preset") or None
         active_condition_preset = st.session_state.get("dashboard_active_condition_preset") or None
         if advanced_settings:
@@ -1209,10 +1172,11 @@ def main() -> None:
     else:
         with st.sidebar:
             config, scenario = build_dashboard_inputs(base_config, base_scenario, editor_source_signature, False)
-    config.setdefault("integrations", {})
-    config["integrations"]["tmap_app_key"] = tmap_app_key.strip()
+    config.pop("integrations", None)
+    if detect_spatial_mode(config, scenario) == "latlon":
+        config["simulation"]["routing_provider"] = "osm"
     config.setdefault("visualization", {})
-    config["visualization"]["map_provider"] = map_render_mode
+    config["visualization"]["map_provider"] = "openstreetmap"
 
     with st.sidebar:
         batch_spec_to_run = None
@@ -1220,7 +1184,7 @@ def main() -> None:
             render_environment_preset_saver(config, detect_spatial_mode(config, scenario))
             render_condition_preset_saver(config, scenario, detect_spatial_mode(config, scenario))
             with st.expander("연결 진단", expanded=False):
-                render_routing_status_panel(config, scenario, tmap_app_key)
+                render_routing_status_panel(config, scenario)
             batch_spec_to_run = render_batch_experiment_controls(
                 config, scenario, policy_name, editor_source_signature,
             )
@@ -1286,7 +1250,11 @@ def main() -> None:
         st.rerun()
 
     if run_requested:
-        result = run_simulation(config, scenario, policy_name)
+        try:
+            result = run_simulation(config, scenario, policy_name)
+        except ValueError as exc:
+            st.error(f"경로 또는 입력을 확인해 주세요: {exc}")
+            st.stop()
         st.session_state["dashboard_result"] = result
         st.session_state["dashboard_config"] = copy.deepcopy(config)
         st.session_state["dashboard_scenario"] = copy.deepcopy(scenario)
@@ -1300,15 +1268,14 @@ def main() -> None:
     else:
         current_signature = make_run_signature(config, scenario, policy_name)
         if st.session_state.get("dashboard_run_signature") != current_signature:
-            st.warning("현재 화면 설정이 마지막 실행 결과와 다릅니다. TMAP 키나 교통 설정을 바꿨다면 `시뮬레이션 실행`을 다시 눌러야 반영됩니다.")
+            st.warning("현재 화면 설정이 마지막 실행 결과와 다릅니다. 차량·요청·속도 설정을 바꿨다면 `시뮬레이션 실행`을 다시 눌러야 반영됩니다.")
 
         result = st.session_state["dashboard_result"]
         st.divider()
         st.subheader("실행 결과")
         active_config = copy.deepcopy(st.session_state.get("dashboard_config", config))
-        # 지도·키 변경은 이미 계산된 이동 결과에도 즉시 반영합니다.
+        # 지도 표시 변경은 이미 계산된 이동 결과에도 즉시 반영합니다.
         active_config["visualization"] = copy.deepcopy(config["visualization"])
-        active_config["integrations"] = copy.deepcopy(config["integrations"])
         active_scenario = st.session_state.get("dashboard_scenario", scenario)
         render_result_summary(result, active_config, active_scenario)
 
@@ -1393,6 +1360,9 @@ def build_dashboard_inputs(base_config: dict, base_scenario: dict, source_signat
         st.session_state.pop("dashboard_condition_editor_source", None)
         for key in ("quick_vehicle_count", "quick_request_count", "quick_duration"):
             st.session_state.pop(key, None)
+    config.pop("integrations", None)
+    if detect_spatial_mode(config, scenario) == "latlon":
+        config["simulation"]["routing_provider"] = "osm"
     if advanced:
         config, scenario = build_editable_inputs(config, scenario, source_signature)
     else:
@@ -1439,7 +1409,7 @@ def build_quick_inputs(config: dict, scenario: dict) -> tuple[dict, dict]:
         scenario["requests"] = generate_random_requests(positions, request_count, spatial_mode, config, seed, radius)
         generation.update({"seed": seed, "radius": radius, "request_count": request_count})
     if spatial_mode == "latlon":
-        st.caption(f"실행 {duration / 60:g}분 · 경로: {_provider_label(simulation.get('routing_provider', 'local_its'))}")
+        st.caption(f"실행 {duration / 60:g}분 · 경로: {_provider_label(simulation.get('routing_provider', 'osm'))}")
     return config, scenario
 
 
@@ -1456,37 +1426,13 @@ def build_editable_inputs(base_config: dict, base_scenario: dict, source_signatu
     distance_unit_label = "deg" if spatial_mode == "latlon" else "cell"
     speed_unit_label = "deg/step" if spatial_mode == "latlon" else "cell/step"
     if spatial_mode == "latlon":
-        config["simulation"].setdefault("routing_provider", "local_its")
-        config["simulation"].setdefault("traffic_update_interval", max(300, int(config["simulation"].get("time_step", 30))))
-        config["simulation"].setdefault(
-            "demand_window_minutes",
-            int(config["simulation"].get("window_minutes", scenario.get("metadata", {}).get("window_minutes", 30))),
-        )
-        config["simulation"].setdefault(
-            "window_start",
-            str(config["simulation"].get("window_start", scenario.get("metadata", {}).get("window_start", ""))),
-        )
-        config["simulation"].pop("timezone_offset", None)
-        config["simulation"].setdefault(
-            "use_prediction_traffic",
-            bool(config["simulation"].get("window_start")),
-        )
-        config["simulation"].setdefault("road_snap_max_distance_meters", 400.0)
-        config["simulation"].setdefault("road_snap_dataset", "")
-        config["simulation"].setdefault("local_its_dataset", "")
-        config["simulation"].setdefault("local_its_average_speed_kph", DEFAULT_LOCAL_ITS_AVERAGE_SPEED_KPH)
-        config["simulation"].setdefault("local_its_use_hourly_speed_profile", False)
-        config["simulation"].setdefault(
-            "local_its_hourly_speed_kph",
-            _default_local_its_hourly_speed_profile(float(config["simulation"]["local_its_average_speed_kph"])),
-        )
-        config["simulation"].setdefault("local_its_allow_bidirectional_fallback", True)
+        config["simulation"].setdefault("routing_provider", "osm")
+        config["simulation"].setdefault("window_start", _current_day_start_text())
         config.setdefault("visualization", {})
-        config["visualization"].setdefault("map_provider", "pydeck")
-        _sync_local_its_speed_profile_state(source_signature, config)
+        config["visualization"].setdefault("map_provider", "openstreetmap")
 
     with st.expander("환경 설정", expanded=False):
-        _render_section_description("시뮬레이션 시간 축, 라우팅 백엔드, 교통 반영 방식, 도로망 데이터셋 같은 전역 실행 조건을 설정합니다.")
+        _render_section_description("시뮬레이션 시간 간격과 OSM 주행 평균 속도 같은 실행 조건을 설정합니다.")
         if spatial_mode == "grid":
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -1538,165 +1484,17 @@ def build_editable_inputs(base_config: dict, base_scenario: dict, source_signatu
                     disabled=True,
                     help="현재 시나리오가 위도/경도 좌표계를 사용한다는 뜻입니다.",
                 )
-            routing_options = ["local_its", "tmap", "simple"]
-            current_provider = str(config["simulation"].get("routing_provider", "local_its"))
-            if current_provider not in routing_options:
-                current_provider = "local_its"
-            config["simulation"]["routing_provider"] = st.selectbox(
-                "라우팅 백엔드",
-                routing_options,
-                index=routing_options.index(current_provider),
-                format_func=_provider_label,
-                help="로컬 ITS 도로망은 API 없이 도로 링크 데이터를 사용하고, TMAP은 외부 API를 사용하며, simple은 직선 경로를 사용합니다.",
+            config["simulation"]["routing_provider"] = "osm"
+            st.caption("OSM 도로망으로 경로를 계산합니다. 인터넷 없이 계산하며, 지도 배경에는 인터넷이 필요합니다.")
+            config["simulation"]["osm_average_speed_kph"] = st.number_input(
+                "주행 평균 속도 (km/h)", min_value=5.0, max_value=80.0,
+                value=float(config["simulation"].get("osm_average_speed_kph", 25.0)), step=1.0,
+                help="실시간 교통이 아닌 시뮬레이션용 일정 속도입니다.",
             )
-            st.markdown("**라우팅 / 시간 설정**")
-            col4, col5, col6 = st.columns(3)
-            with col4:
-                config["simulation"]["traffic_update_interval"] = st.number_input(
-                    f"교통 재반영 주기 ({time_unit_label})",
-                    min_value=30,
-                    max_value=3600,
-                    value=int(config["simulation"]["traffic_update_interval"]),
-                    step=30,
-                    help="이 주기마다 TMAP 경로를 다시 조회해 현재 교통 상황을 반영합니다.",
-                )
-            with col5:
-                config["simulation"]["demand_window_minutes"] = st.number_input(
-                    "수요 집계 윈도우 (min)",
-                    min_value=5,
-                    max_value=240,
-                    value=int(config["simulation"]["demand_window_minutes"]),
-                    step=5,
-                    help="실데이터 요청을 어떤 시간 폭으로 잘라 시뮬레이션할지 나타냅니다.",
-                )
-            with col6:
-                config["simulation"]["window_start"] = st.text_input(
-                    "시뮬레이션 시작 시각",
-                    value=str(config["simulation"]["window_start"]),
-                    help="예: 2026-04-02 08:00:00. 한국 시간(KST) 기준 시작 시각이며, 이 시각부터 각 step의 결과 시간이 계산됩니다.",
-                )
-            st.caption("시간 기준은 한국 시간(KST, UTC+09:00)으로 고정됩니다.")
-            config["simulation"]["use_prediction_traffic"] = st.checkbox(
-                "시작 시각 기준 도로 경로 사용",
-                value=bool(config["simulation"]["use_prediction_traffic"]),
-                help="TMAP 사용 시에만 의미가 있습니다. 켜면 시뮬레이션 시작 시각 기준 `gpsTime` 경로를, 끄면 현재 시점 기준 경로를 사용합니다.",
+            config["simulation"]["window_start"] = st.text_input(
+                "시뮬레이션 시작 시각", value=str(config["simulation"].get("window_start", "2026-04-02 00:00:00")),
             )
-            provider = config["simulation"]["routing_provider"]
-            if provider == "tmap":
-                col9, col10 = st.columns(2)
-                with col9:
-                    config["simulation"]["road_snap_max_distance_meters"] = st.number_input(
-                        "도로 스냅 허용 거리 (m)",
-                        min_value=10.0,
-                        max_value=1000.0,
-                        value=float(config["simulation"]["road_snap_max_distance_meters"]),
-                        step=10.0,
-                        help="TMAP이 도로 geometry를 주지 못할 때, 이 거리 안의 가장 가까운 도로 노드로 좌표를 보정해 다시 시도합니다.",
-                    )
-                with col10:
-                    dataset_hint = str(config["simulation"].get("road_snap_dataset", "")).strip() or "auto-detect"
-                    st.text_input(
-                        "TMAP 스냅 데이터셋",
-                        value=dataset_hint,
-                        disabled=True,
-                        help="비어 있으면 동작구 ITS 좌표 파일을 자동 탐색합니다.",
-                    )
-            elif provider == "local_its":
-                col9, col10, col11 = st.columns(3)
-                with col9:
-                    config["simulation"]["local_its_average_speed_kph"] = st.number_input(
-                        "ITS 평균 속도 (km/h)",
-                        min_value=5.0,
-                        max_value=80.0,
-                        value=float(config["simulation"]["local_its_average_speed_kph"]),
-                        step=1.0,
-                        help="고정 속도 모드에서 쓰는 기본 평균 속도입니다. 시간대별 속도표를 켜면 각 시(hour)의 값이 이 값을 대신합니다.",
-                    )
-                with col10:
-                    config["simulation"]["local_its_use_hourly_speed_profile"] = st.checkbox(
-                        "24시간 속도표 사용",
-                        key="local_its_use_hourly_speed_profile",
-                        help="켜면 시뮬레이션 절대 시각의 시(hour)에 따라 ITS 평균 속도가 바뀝니다.",
-                    )
-                with col11:
-                    config["simulation"]["local_its_allow_bidirectional_fallback"] = st.checkbox(
-                        "역방향 fallback 허용",
-                        value=bool(config["simulation"]["local_its_allow_bidirectional_fallback"]),
-                        help="방향 그래프에서 경로가 막힐 때, 학습용 안정성을 위해 양방향 그래프로 한 번 더 시도합니다.",
-                    )
-                st.text_input(
-                    "ITS 도로 데이터셋",
-                    value=str(config["simulation"].get("local_its_dataset", "")).strip() or "auto-detect",
-                    disabled=True,
-                    help="비어 있으면 서울 ITS 링크/노드 데이터셋을 자동 사용합니다.",
-                )
-                hourly_speed_profile = _normalize_local_its_hourly_speed_profile(
-                    config["simulation"].get("local_its_hourly_speed_kph", []),
-                    float(config["simulation"]["local_its_average_speed_kph"]),
-                )
-                hourly_profile_defaults = _normalize_local_its_hourly_speed_profile(
-                    st.session_state.get("dashboard_local_its_hourly_default_profile", hourly_speed_profile),
-                    float(config["simulation"]["local_its_average_speed_kph"]),
-                )
-                hourly_widget_namespace = str(
-                    st.session_state.get("dashboard_local_its_hourly_widget_namespace", "default")
-                )
-                edited_hourly_profile: list[float] = []
-                if bool(config["simulation"]["local_its_use_hourly_speed_profile"]):
-                    st.caption(
-                        "24시간 속도표: 절대 시각의 `00~23시` 구간에 따라 적용 속도가 바뀝니다. "
-                        f"기본값은 최근 보유 ITS 시분별 평균(`{DEFAULT_LOCAL_ITS_SPEED_PROFILE_SOURCE}`)에서 채워집니다."
-                    )
-                    for row_start in range(0, 24, 6):
-                        hour_columns = st.columns(6)
-                        for offset, hour_col in enumerate(hour_columns):
-                            hour = row_start + offset
-                            with hour_col:
-                                widget_key = f"local_its_hourly_speed_{hourly_widget_namespace}_{hour}"
-                                widget_kwargs = {
-                                    "min_value": 5.0,
-                                    "max_value": 80.0,
-                                    "step": 1.0,
-                                    "key": widget_key,
-                                    "help": f"{hour:02d}:00~{hour:02d}:59에 적용할 ITS 평균 속도입니다.",
-                                }
-                                if widget_key not in st.session_state:
-                                    widget_kwargs["value"] = float(hourly_profile_defaults[hour])
-                                edited_hourly_profile.append(
-                                    float(
-                                        st.number_input(
-                                            f"{hour:02d}시",
-                                            **widget_kwargs,
-                                        )
-                                    )
-                                )
-                else:
-                    edited_hourly_profile = [
-                        float(
-                            st.session_state.get(
-                                f"local_its_hourly_speed_{hourly_widget_namespace}_{hour}",
-                                hourly_profile_defaults[hour],
-                            )
-                        )
-                        for hour in range(24)
-                    ]
-                config["simulation"]["local_its_hourly_speed_kph"] = edited_hourly_profile
-                config["simulation"]["local_its_use_hourly_speed_profile"] = bool(
-                    config["simulation"]["local_its_use_hourly_speed_profile"]
-                )
-                if not bool(config["simulation"]["local_its_use_hourly_speed_profile"]):
-                    dataset_hint = str(config["simulation"].get("local_its_dataset", "")).strip() or "auto-detect"
-                    st.caption(f"고정 평균 속도 모드입니다. 현재 적용 속도: {float(config['simulation']['local_its_average_speed_kph']):.1f} km/h")
-                    st.caption(f"ITS 데이터셋: {dataset_hint}")
-                else:
-                    st.caption(
-                        f"고정 평균 속도 기본값도 최근 평균에 맞춰 {DEFAULT_LOCAL_ITS_AVERAGE_SPEED_KPH:.1f} km/h로 맞춰집니다."
-                    )
-                    render_hourly_speed_profile_chart(edited_hourly_profile)
-            st.info(
-                "연동 기준: `시뮬레이션 시작 시각 + Timezone`은 절대 시간을 계산해 TMAP 기준 시각과 결과 표시에 반영됩니다. "
-                "`로컬 ITS`에서는 24시간 속도표를 켰을 때 이 절대 시각의 시(hour)를 읽어 적용 속도가 바뀌고, 끄면 고정 평균 속도를 사용합니다."
-            )
+            st.caption("시간 기준: 한국 시간(KST). 기본 도로망 범위를 벗어나면 좌표를 수정해 주세요.")
 
     with st.expander("차량 설정", expanded=False):
         _render_section_description(
@@ -1885,7 +1683,7 @@ def build_editable_inputs(base_config: dict, base_scenario: dict, source_signatu
         st.session_state["dashboard_vehicle_count"] = int(vehicle_count)
 
     with st.expander("요청 설정", expanded=False):
-        _render_section_description("요청 수와 생성 반경만 지정하면, 현재 차량 시작 위치 근방에서 출발지/도착지, 생성 시각, 최대 대기 시간을 겹치지 않게 랜덤 생성합니다. lat/lon 모드에서는 생성 좌표가 도로망 밖이면 가까운 로컬 ITS 도로 노드로 스냅합니다.")
+        _render_section_description("요청 수와 생성 반경만 지정하면, 현재 차량 시작 위치 근방에서 출발지/도착지, 생성 시각, 최대 대기 시간을 겹치지 않게 랜덤 생성합니다. lat/lon 모드에서는 생성 좌표가 도로망 밖이면 가까운 OSM 도로 노드로 스냅합니다.")
         available_request_count = len(scenario.get("requests", []))
         existing_request_count = max(1, available_request_count)
         request_count = st.number_input(
@@ -2016,7 +1814,7 @@ def build_editable_inputs(base_config: dict, base_scenario: dict, source_signatu
         st.caption(
             f"랜덤 생성 규칙: 차량 시작 위치 반경 {float(generation_radius):.0f} {generation_radius_unit} 안에서 요청을 만들고, "
             f"생성 시각은 0~{int(config['simulation']['max_time'])} {time_unit_label}, 최대 대기 시간은 {wait_min}~{wait_max} {time_unit_label} 범위에서 무작위로 배정합니다. "
-            "lat/lon 모드에서는 생성된 좌표가 도로망 위가 아니면 가까운 접근 가능한 로컬 ITS 도로 노드로 보정합니다."
+            "lat/lon 모드에서는 생성된 좌표가 도로망 위가 아니면 가까운 접근 가능한 OSM 도로 노드로 보정합니다."
         )
 
         if spatial_mode == "latlon":
@@ -2102,8 +1900,7 @@ def run_simulation(config: dict, scenario: dict, policy_name: str) -> dict:
 def make_run_signature(config: dict, scenario: dict, policy_name: str) -> str:
     simulation_config = copy.deepcopy(config)
     simulation_config.pop("visualization", None)
-    if simulation_config.get("simulation", {}).get("routing_provider") != "tmap":
-        simulation_config.pop("integrations", None)
+    simulation_config.pop("integrations", None)
     payload = {
         "config": simulation_config,
         "scenario": scenario,
@@ -2494,151 +2291,18 @@ def find_diagnostic_route(scenario: dict, config: dict) -> tuple[tuple[float, fl
     return None
 
 
-def diagnose_tmap_routing(config: dict, scenario: dict) -> dict:
-    env = MobilityEnv(config=config, scenario=scenario)
-    service = env.routing_service
-    requests = scenario.get("requests", [])
-    positions = config.get("vehicles", {}).get("initial_positions", [])
-    diagnosis = {
-        "routing_service": None if service is None else service.__class__.__name__,
-        "simulation_start_time": None if env.simulation_start_time is None else env.simulation_start_time.isoformat(timespec="seconds"),
-        "traffic_reference_mode": env.timeline[0]["info"].get("traffic_reference_mode"),
-        "key_present": bool(get_tmap_app_key(config)),
-        "configured_provider": config.get("simulation", {}).get("routing_provider"),
-        "space_mode": config.get("simulation", {}).get("space_mode"),
-        "request_count": len(requests),
-        "vehicle_count": len(positions),
-    }
-    route_points = find_diagnostic_route(scenario, config)
-    if service is None:
-        diagnosis["status"] = "unavailable"
-        diagnosis["reason"] = "routing_service_unavailable"
-        if detect_spatial_mode(config, scenario) == "latlon":
-            diagnosis["message"] = (
-                "lat/lon 시나리오인데 내부 space_mode가 grid로 남아 있었거나, "
-                "라우팅이 비활성화되어 백엔드 라우팅 서비스가 생성되지 않았습니다."
-            )
-        else:
-            diagnosis["message"] = "현재 설정에서는 백엔드 라우팅 서비스가 생성되지 않았습니다."
-        return diagnosis
-    if route_points is None:
-        diagnosis["status"] = "unavailable"
-        diagnosis["reason"] = "diagnostic_route_missing"
-        diagnosis["message"] = (
-            "점검용 출발지/도착지를 만들 수 없습니다. 요청의 origin/destination 좌표 또는 차량 시작 위치를 확인해 주세요."
-        )
-        return diagnosis
-
-    start, end = route_points
-    diagnosis["start"] = start
-    diagnosis["end"] = end
-    diagnosis["use_reference_time_routing"] = bool(getattr(service, "use_reference_time_routing", False))
-    time_step = int(config.get("simulation", {}).get("time_step", 30))
-    reference_time = env._get_reference_time()
-
-    try:
-        route_plan = service.plan_route(
-            start,
-            end,
-            float(config.get("vehicles", {}).get("speed", 1.0)),
-            time_step,
-            reference_time=reference_time,
-        )
-        diagnosis["status"] = "ok"
-        diagnosis["route_source"] = route_plan.source
-        diagnosis["path_points"] = len(route_plan.path)
-        diagnosis["total_time"] = route_plan.total_time
-        diagnosis["metadata"] = route_plan.metadata
-    except Exception as exc:
-        diagnosis["status"] = "error"
-        diagnosis["error"] = f"{exc.__class__.__name__}: {exc}"
-    return diagnosis
 
 
-def render_routing_status_panel(config: dict, scenario: dict, tmap_app_key: str) -> None:
-    st.markdown("**라우팅 상태**")
-    spatial_mode = detect_spatial_mode(config, scenario)
-    key_present = bool(tmap_app_key.strip())
-    provider = config.get("simulation", {}).get("routing_provider", "simple")
-    map_provider = config.get("visualization", {}).get("map_provider", "coordinate")
-    st.caption(
-        f"좌표계: {spatial_mode} / 키 입력: {'yes' if key_present else 'no'} / "
-        f"지도: {_map_provider_label(str(map_provider))} / "
-        f"백엔드 provider: {provider}"
-    )
-
-    if spatial_mode != "latlon":
-        st.info("grid 시나리오에서는 TMAP 교통 라우팅을 사용하지 않습니다.")
+def render_routing_status_panel(config: dict, scenario: dict) -> None:
+    if detect_spatial_mode(config, scenario) != "latlon":
+        st.info("격자 모드는 외부 지도나 경로 서비스를 사용하지 않습니다.")
         return
+    from simulator.osm_routing import load_osm_graph
+    graph = load_osm_graph()
+    st.success(f"내장 OSM 도로망 준비 완료: {len(graph['nodes']):,}개 지점")
+    st.caption("서울 동작·서초 실습 지역. API 키와 외부 경로 요청 없이 계산합니다. 일방통행을 반영하며 실시간 교통·회전 제한은 반영하지 않습니다.")
+    st.caption(f"범위 [남, 서, 북, 동]: {graph['bounds']}")
 
-    if provider == "local_its":
-        dataset_hint = str(config.get("simulation", {}).get("local_its_dataset", "")).strip() or "auto-detect"
-        geometry_hint = str(config.get("simulation", {}).get("local_its_geometry_dataset", "")).strip() or "auto-detect"
-        speed_profile_mode = (
-            "24시간 속도표"
-            if bool(config.get("simulation", {}).get("local_its_use_hourly_speed_profile", False))
-            else "고정 평균 속도"
-        )
-        st.success("로컬 ITS 도로망 라우팅을 사용 중입니다.")
-        st.caption(
-            f"데이터셋: {dataset_hint} / "
-            f"geometry: {geometry_hint} / "
-            f"속도 모드: {speed_profile_mode} / "
-            f"기본 평균 속도: {config.get('simulation', {}).get('local_its_average_speed_kph', 'n/a')} km/h / "
-            f"역방향 fallback: {'on' if config.get('simulation', {}).get('local_its_allow_bidirectional_fallback', True) else 'off'}"
-        )
-        return
-
-    if provider == "simple":
-        st.info("직선 기준 simple 라우팅을 사용 중입니다. 외부 API나 로컬 도로망 그래프는 사용하지 않습니다.")
-        return
-
-    if not key_present:
-        st.warning("TMAP 경로 계산에는 App Key가 필요합니다. 지도 연결과 경로 계산 권한을 각각 확인하세요.")
-
-    diagnosis_signature = make_run_signature(config, scenario, "__diagnose__")
-    if st.button(
-        "TMAP 라우팅 점검",
-        use_container_width=True,
-        help="현재 선택한 시나리오의 대표 O-D 한 건으로 TMAP 경로 조회가 실제로 되는지 간단히 점검합니다.",
-    ):
-        st.session_state["dashboard_tmap_diagnosis"] = diagnose_tmap_routing(config, scenario)
-        st.session_state["dashboard_tmap_diagnosis_signature"] = diagnosis_signature
-
-    diagnosis = st.session_state.get("dashboard_tmap_diagnosis")
-    if not diagnosis:
-        return
-    if st.session_state.get("dashboard_tmap_diagnosis_signature") != diagnosis_signature:
-        st.info("현재 설정이 마지막 TMAP 점검과 다릅니다. 설정을 바꿨다면 `TMAP 라우팅 점검`을 다시 실행해 주세요.")
-        return
-
-    if diagnosis.get("status") == "ok":
-        route_source = diagnosis.get("route_source", "-")
-        if route_source.startswith("tmap_"):
-            st.success(f"TMAP 라우팅 점검 성공: {route_source}")
-        else:
-            st.warning(f"라우팅 점검 결과가 TMAP이 아니라 `{route_source}` 로 내려갔습니다.")
-        st.caption("이 점검은 대표 경로 1건만 확인합니다. 실제 실행에서는 다른 요청 O-D나 재탐색 구간에서 추가 실패가 생길 수 있습니다.")
-        st.caption(
-            f"서비스: {diagnosis.get('routing_service')} / "
-            f"기준 시각: {_format_display_datetime(diagnosis.get('simulation_start_time'))} / "
-            f"path points: {diagnosis.get('path_points', 0)}"
-        )
-        if diagnosis.get("metadata"):
-            st.json(diagnosis["metadata"], expanded=False)
-    elif diagnosis.get("status") == "error":
-        st.error(f"TMAP 라우팅 점검 실패: {diagnosis.get('error')}")
-    else:
-        st.info(
-            diagnosis.get("message")
-            or "TMAP 라우팅 점검을 실행할 수 없는 설정입니다."
-        )
-        st.caption(
-            f"space_mode: {diagnosis.get('space_mode')} / "
-            f"request_count: {diagnosis.get('request_count')} / "
-            f"vehicle_count: {diagnosis.get('vehicle_count')} / "
-            f"routing_service: {diagnosis.get('routing_service') or 'None'}"
-        )
 
 def render_initial_summary(config: dict, scenario: dict, snapshot: dict) -> None:
     st.markdown("**초기 환경 요약**")
@@ -2663,7 +2327,7 @@ def render_initial_summary(config: dict, scenario: dict, snapshot: dict) -> None
         extra_items.extend(
             [
                 ("라우팅", _provider_label(str(config["simulation"].get("routing_provider", "simple")))),
-                ("ITS 평균 속도 (km/h)", str(config["simulation"].get("local_its_average_speed_kph", "n/a"))),
+                ("평균 속도 (km/h)", str(config["simulation"].get("osm_average_speed_kph", 25.0))),
             ]
         )
     if extra_items:
@@ -3362,7 +3026,7 @@ def build_route_failure_rows(frame: dict) -> list[dict]:
                     "request_transport": metadata.get("request_transport", "-"),
                     "requested_start": json.dumps(metadata.get("requested_start"), ensure_ascii=False),
                     "requested_end": json.dumps(metadata.get("requested_end"), ensure_ascii=False),
-                    "failure_summary": summarize_tmap_failure(metadata),
+                    "failure_summary": summarize_route_failure(metadata),
                     "response_coord_type": metadata.get("response_coord_type", "-"),
                     "upstream_errors": " | ".join(metadata.get("upstream_errors", [])) or "-",
                 }
@@ -3370,30 +3034,8 @@ def build_route_failure_rows(frame: dict) -> list[dict]:
     return failure_rows
 
 
-def summarize_tmap_failure(metadata: dict) -> str:
-    upstream_errors = " | ".join(metadata.get("upstream_errors", []))
-    lowered = upstream_errors.lower()
-    if "401" in lowered or "403" in lowered or "unauthorized" in lowered or "forbidden" in lowered:
-        return "인증/권한 또는 사용 상품 설정 문제 가능성"
-    if "400" in lowered or "bad request" in lowered:
-        return "좌표/파라미터 형식 문제 가능성"
-    if "did not contain linestring geometry" in lowered or "linestring geometry" in lowered:
-        if "geometry_types=multilinestring" in lowered:
-            return "응답 geometry가 MultiLineString 형태일 가능성"
-        if "geometry_types=point" in lowered:
-            return "응답이 Point 위주라 경로 polyline 해석 실패"
-        if "geometry_types=unknown" in lowered:
-            return "정상 경로 GeoJSON이 아닌 응답 형식 가능성"
-        return "도로망 geometry 없음. 좌표가 도로에서 벗어났을 가능성"
-    if "timeout" in lowered:
-        return "TMAP 응답 시간 초과"
-    if "urlerror" in lowered or "temporary failure" in lowered or "name or service not known" in lowered:
-        return "네트워크 연결 문제 가능성"
-    if "jsondecodeerror" in lowered:
-        return "TMAP 응답 형식 해석 실패"
-    if metadata.get("fallback_reason") == "tmap_request_failed":
-        return "TMAP 호출 실패 후 fallback"
-    return "원인 분류 필요"
+def summarize_route_failure(metadata: dict) -> str:
+    return str(metadata.get("error") or metadata.get("fallback_reason") or "경로를 확인해 주세요.")
 
 
 def build_road_snap_rows(frame: dict) -> list[dict]:
@@ -3736,82 +3378,13 @@ def render_frame_details(frame: dict, config: dict | None = None, timeline: list
                 if source
             }
         )
-        traffic_mode = info.get("traffic_reference_mode")
-        tmap_key_present = bool(get_tmap_app_key(config or {}))
-        configured_provider = (config or {}).get("simulation", {}).get("routing_provider")
-
-        status_message = None
-        if routing_provider == "TmapRoutingService":
-            tmap_sources = [source for source in historical_sources if source.startswith("tmap_")]
-            fallback_sources = [source for source in historical_sources if source.startswith("simple")]
-            if route_failure_rows and tmap_sources:
-                failure_summaries = sorted({row.get("failure_summary") for row in route_failure_rows if row.get("failure_summary")})
-                status_message = (
-                    f"일부 TMAP 경로 요청이 실패해 simple_fallback으로 내려갔습니다. "
-                    f"실패 건수 {len(route_failure_rows)}건을 아래에서 확인하세요."
-                )
-                st.warning(status_message)
-                st.caption("추정 원인: " + ", ".join(failure_summaries))
-            elif fallback_sources and all(source.startswith("simple") for source in historical_sources):
-                failure_summaries = sorted({row.get("failure_summary") for row in route_failure_rows if row.get("failure_summary")})
-                status_message = (
-                    "TMAP 라우팅 서비스는 생성됐지만, 경로 API 응답이 실패해 simple_fallback 경로로 실행 중입니다."
-                )
-                st.warning(status_message)
-                if failure_summaries:
-                    st.caption("추정 원인: " + ", ".join(failure_summaries))
-            elif any(source.startswith("tmap_live_gpstime") for source in historical_sources):
-                status_message = "시뮬레이션 시작 시각을 `gpsTime`으로 전달한 TMAP 자동차 경로를 사용 중입니다."
-                st.success(status_message)
-                if road_snap_rows:
-                    st.caption(f"도로 스냅 보정이 적용된 경로 {len(road_snap_rows)}건이 있습니다.")
-            elif any(source.startswith("tmap_live") for source in historical_sources):
-                status_message = "TMAP 실시간 교통 경로를 사용 중입니다."
-                st.success(status_message)
-                if road_snap_rows:
-                    st.caption(f"도로 스냅 보정이 적용된 경로 {len(road_snap_rows)}건이 있습니다.")
-            else:
-                status_message = "TMAP 라우팅 서비스는 준비됐지만, 아직 경로가 생성되지 않았습니다."
-                st.info(status_message)
-        elif routing_provider == "LocalITSRoutingService":
-            local_sources = [source for source in historical_sources if source and source.startswith("local_its")]
-            fallback_sources = [source for source in historical_sources if source and source.startswith("local_its_fallback")]
-            if local_sources:
-                status_message = "로컬 ITS 도로망 기반 경로를 사용 중입니다."
-                st.success(status_message)
-            elif fallback_sources:
-                status_message = "로컬 ITS 도로망 경로 생성에 실패해 직선 fallback으로 실행 중입니다."
-                st.warning(status_message)
-            else:
-                status_message = "로컬 ITS 도로망 라우팅 서비스는 준비됐지만, 아직 경로가 생성되지 않았습니다."
-                st.info(status_message)
-        elif routing_provider == "StraightLineRoutingService":
-            if configured_provider == "tmap" and not tmap_key_present:
-                status_message = "TMAP App Key가 비어 있어서 실제 교통 대신 simple 경로로 실행 중입니다."
-            elif configured_provider == "local_its":
-                status_message = "로컬 ITS 데이터셋을 찾지 못했거나 로드하지 못해 simple 경로로 실행 중입니다."
-            elif configured_provider == "simple":
-                status_message = "현재 설정에서 simple 라우팅 백엔드를 선택해 실행 중입니다."
-            else:
-                status_message = "현재 경로는 simple 라우팅으로 실행 중이며 실제 교통은 반영되지 않습니다."
-            st.warning(status_message)
-
-        if info.get("simulation_start_time") or traffic_mode or status_message:
-            st.caption(
-                f"시뮬레이션 시작 시각: {_format_display_datetime(info.get('simulation_start_time'))}"
-                f" / 교통 반영 모드: {traffic_mode or 'not_enabled'}"
-            )
+        st.caption("OSM 도로망 경로 · 일정 평균 속도 기준 · 실시간 교통 미반영")
         if route_failure_rows:
-            with st.expander("TMAP fallback 상세", expanded=False):
-                st.caption(
-                    "실패한 경로 요청의 출발/도착 좌표와 TMAP upstream 에러를 확인할 수 있습니다. "
-                    "특정 OD만 반복 실패하면 좌표가 도로망에서 벗어나 있거나 요청 형식/권한 문제가 있는 경우가 많습니다."
-                )
-                st.dataframe(route_failure_rows, use_container_width=True, height=220)
+            st.warning("경로 오류가 있습니다. 좌표와 도로망 범위를 확인해 주세요.")
+            st.dataframe(route_failure_rows, use_container_width=True)
         if road_snap_rows:
-            with st.expander("도로 스냅 보정 상세", expanded=False):
-                st.caption("TMAP direct geometry가 없을 때 가까운 도로 노드로 보정해 재시도한 경로입니다.")
-                st.dataframe(road_snap_rows, use_container_width=True, height=180)
+            with st.expander("도로 연결 위치", expanded=False):
+                st.dataframe(road_snap_rows, use_container_width=True)
 
 
 def detect_spatial_mode(config: dict, scenario: dict) -> str:
@@ -4188,27 +3761,11 @@ def render_spatial_view(
     show_supporting_info: bool = True,
 ) -> None:
     if detect_spatial_mode(config, scenario) == "latlon":
-        provider = config.get("visualization", {}).get("map_provider", "coordinate")
-        if provider == "tmap":
-            render_tmap_map(frame, config, compact=compact, timeline=timeline, show_supporting_info=show_supporting_info)
-            return
-        if provider == "coordinate":
-            render_coordinate_view(frame, compact=compact, timeline=timeline, show_supporting_info=show_supporting_info)
-            return
-        if provider == "pydeck":
-            render_map(frame, compact=compact, timeline=timeline, show_supporting_info=show_supporting_info)
-            return
         render_openstreetmap_map(frame, compact=compact, timeline=timeline, show_supporting_info=show_supporting_info)
         return
     render_grid(frame, config, compact=compact, show_legend=show_legend)
 
 
-def get_tmap_app_key(config: dict) -> str:
-    return (
-        config.get("integrations", {}).get("tmap_app_key")
-        or _default_tmap_key()
-        or ""
-    ).strip()
 
 
 VEHICLE_COLOR_PALETTE = [
@@ -4561,26 +4118,7 @@ def render_spatial_supporting_info(
     if detect_spatial_mode(config, scenario) != "latlon":
         return
     payload = build_map_payload(frame, timeline=timeline)
-    provider = config.get("visualization", {}).get("map_provider", "coordinate")
-    if provider == "tmap":
-        render_map_supporting_info(payload, "TMAP 기반 지도입니다. 차량·요청 출발/도착·이동 경로를 함께 표시합니다.")
-        return
-    if provider == "coordinate":
-        render_map_supporting_info(
-            payload,
-            "좌표 검증 뷰입니다. 요청 O/D, 도로망 경로, 실제 주행 누적 경로를 비교해서 확인할 수 있습니다.",
-        )
-        return
-    if provider == "pydeck":
-        render_map_supporting_info(
-            payload,
-            "PyDeck 오픈 지도입니다. 요청 O/D, 도로망 경로, 실제 주행 누적 경로를 한 화면에서 비교할 수 있습니다.",
-        )
-        return
-    render_map_supporting_info(
-        payload,
-        "OpenStreetMap 기반 지도입니다. 요청 O/D, 도로망 경로, 실제 주행 누적 경로를 한 화면에서 함께 확인할 수 있습니다.",
-    )
+    render_map_supporting_info(payload, "OpenStreetMap 지도와 내장 OSM 도로망 경로입니다. 지도 연결이 끊겨도 좌표와 경로를 표시합니다.")
 
 
 def _apply_label_offsets(point_groups: list[list[dict]], threshold: float = 0.00018) -> None:
@@ -4732,7 +4270,7 @@ def build_map_payload(frame: dict, timeline: list[dict] | None = None) -> dict:
                     if len(vehicle.get("route_history_sources", [])) >= path_index
                     else None
                 )
-                if route_source and (route_source.startswith("tmap_") or route_source.startswith("local_its")):
+                if route_source and (route_source.startswith("osm") or route_source.startswith("local_its")):
                     road_network_paths.append(
                         {
                             "vehicle_id": vehicle_id,
@@ -5123,29 +4661,6 @@ def build_coordinate_svg(payload: dict, compact: bool = False, include_intro: bo
     """
 
 
-def render_tmap_map(
-    frame: dict,
-    config: dict,
-    compact: bool = False,
-    timeline: list[dict] | None = None,
-    show_supporting_info: bool = True,
-) -> None:
-    payload = build_map_payload(frame, timeline=timeline)
-    if not any(payload[name] for name in ("vehicle_points", "vehicle_start_points", "request_origin_points", "request_destination_points")):
-        st.info("지도에 표시할 좌표 데이터가 없습니다.")
-        return
-    app_key = get_tmap_app_key(config)
-    if not app_key:
-        st.info("TMAP App Key를 입력하면 실제 지도가 표시됩니다. 현재는 좌표 보기입니다.")
-        render_coordinate_view(frame, compact=compact, timeline=timeline, show_supporting_info=show_supporting_info)
-        return
-    fallback_svg = build_coordinate_svg(payload, compact=compact, include_intro=False)
-    components.html(
-        build_tmap_html(payload, app_key, fallback_svg, compact),
-        height=440 if compact else 620, scrolling=False,
-    )
-    if show_supporting_info:
-        render_map_supporting_info(payload, "TMAP 지도 · 차량·요청·이동 경로. 지도와 경로 계산 서비스는 별도로 설정합니다.", compact=compact)
 
 
 def render_openstreetmap_map(
@@ -5319,7 +4834,7 @@ def render_openstreetmap_map(
           crossorigin=""
         ></script>
         <script>
-          const payload = {json.dumps(payload, ensure_ascii=False)};
+          const payload = {json.dumps(payload, ensure_ascii=False).replace(chr(60), chr(92) + "u003c")};
           const vehicleCoreRadius = {8 if compact else 11};
           const vehicleHaloRadius = {13 if compact else 19};
           const vehicleHaloOpacity = {0.18 if compact else 0.24};
@@ -5345,8 +4860,10 @@ def render_openstreetmap_map(
           }}
 
           function showMap() {{
+            const wasHidden = mapDiv.style.display === "none";
             fallbackDiv.style.display = "none";
             mapDiv.style.display = "block";
+            if (wasHidden) window.dispatchEvent(new Event("resize"));
           }}
 
           if (!window.L) {{
@@ -5355,11 +4872,11 @@ def render_openstreetmap_map(
             const map = L.map("{map_div_id}", {{
               zoomControl: true,
               scrollWheelZoom: true
-            }});
+            }}).setView([37.501, 126.985], 13);
 
-            const tileLayer = L.tileLayer("https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
+            const tileLayer = L.tileLayer("https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
               maxZoom: 19,
-              attribution: "&copy; OpenStreetMap contributors"
+              attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
             }}).addTo(map);
 
             let tileLoaded = false;
@@ -5378,7 +4895,7 @@ def render_openstreetmap_map(
               if (!tileLoaded) {{
                 showFallback("외부 지도 타일 응답이 없어 좌표 검증 뷰로 전환했습니다.");
               }}
-            }}, 3500);
+            }}, 15000);
 
             function addPath(path, options, label) {{
               if (!path || path.length < 2) {{
@@ -5678,297 +5195,6 @@ def render_coordinate_view(
         render_map_supporting_info(
             payload,
             "좌표 검증 뷰입니다. 요청 O/D, 도로망 경로, 실제 주행 누적 경로를 비교해서 확인할 수 있습니다.",
-            compact=compact,
-        )
-
-
-def render_map(
-    frame: dict,
-    compact: bool = False,
-    timeline: list[dict] | None = None,
-    show_supporting_info: bool = True,
-) -> None:
-    payload = build_map_payload(frame, timeline=timeline)
-    vehicle_points = payload["vehicle_points"]
-    vehicle_start_points = payload["vehicle_start_points"]
-    request_origin_points = payload["request_origin_points"]
-    request_destination_points = payload["request_destination_points"]
-    request_pairs = payload["request_pairs"]
-    actual_vehicle_paths = payload["actual_vehicle_paths"]
-    active_routes = payload["active_routes"]
-    planned_route_history = payload["planned_route_history"]
-    road_network_paths = payload["road_network_paths"]
-    all_points = vehicle_points + vehicle_start_points + request_origin_points + request_destination_points
-    if not all_points:
-        st.info("지도에 표시할 좌표 데이터가 없습니다.")
-        return
-
-    avg_lat = sum(point["coordinates"][1] for point in all_points) / len(all_points)
-    avg_lon = sum(point["coordinates"][0] for point in all_points) / len(all_points)
-    zoom = 12 if compact else 13
-    origin_base_radius = 18 if compact else 28
-    destination_base_radius = 16 if compact else 24
-    vehicle_core_radius = 30 if compact else 46
-    vehicle_halo_radius = 42 if compact else 62
-
-    request_origin_points = [
-        {
-            **point,
-            "render_radius": origin_base_radius * float(point.get("size_scale", 1.0)),
-            "emphasis_radius": origin_base_radius * float(point.get("size_scale", 1.0)) * 1.35,
-            "emphasis_line_width": max(4, int(point.get("border_width", 3))),
-        }
-        for point in request_origin_points
-    ]
-    request_destination_points = [
-        {
-            **point,
-            "render_radius": destination_base_radius * float(point.get("size_scale", 1.0)),
-            "emphasis_radius": destination_base_radius * float(point.get("size_scale", 1.0)) * 1.45,
-            "emphasis_line_width": max(4, int(point.get("border_width", 3))),
-        }
-        for point in request_destination_points
-    ]
-    vehicle_points = [
-        {
-            **point,
-            "render_radius": vehicle_core_radius,
-            "halo_radius": vehicle_halo_radius + (8 if point.get("pulse") else 0),
-            "emphasis_radius": vehicle_core_radius + 10,
-            "emphasis_line_width": max(4, int(point.get("border_width", 3))),
-        }
-        for point in vehicle_points
-    ]
-    active_request_origin_points = [point for point in request_origin_points if point.get("pulse")]
-    active_request_destination_points = [point for point in request_destination_points if point.get("pulse")]
-    active_vehicle_points = [point for point in vehicle_points if point.get("pulse")]
-
-    layers = [
-        pdk.Layer(
-            "PathLayer",
-            request_pairs,
-            get_path="path",
-            get_width=2,
-            get_color=[148, 163, 184, 140],
-            pickable=False,
-        ),
-    ]
-    if road_network_paths:
-        layers.append(
-            pdk.Layer(
-                "PathLayer",
-                road_network_paths,
-                get_path="path",
-                get_width=6,
-                get_color="color_rgba",
-                pickable=True,
-            )
-        )
-    if planned_route_history:
-        layers.append(
-            pdk.Layer(
-                "PathLayer",
-                planned_route_history,
-                get_path="path",
-                get_width=3,
-                get_color="color_rgba",
-                pickable=True,
-            )
-        )
-    if actual_vehicle_paths:
-        layers.append(
-            pdk.Layer(
-                "PathLayer",
-                actual_vehicle_paths,
-                get_path="path",
-                get_width=4,
-                get_color="color_rgba",
-                pickable=True,
-            )
-        )
-    if active_routes:
-        layers.append(
-            pdk.Layer(
-                "PathLayer",
-                active_routes,
-                get_path="path",
-                get_width=5,
-                get_color="color_rgba",
-                pickable=True,
-            )
-        )
-    if vehicle_start_points:
-        layers.append(
-            pdk.Layer(
-                "ScatterplotLayer",
-                vehicle_start_points,
-                get_position="coordinates",
-                get_fill_color=[255, 255, 255, 0],
-                get_line_color="line_rgba",
-                get_line_width=3,
-                get_radius=34 if compact else 46,
-                stroked=True,
-                filled=True,
-                pickable=True,
-            )
-        )
-    if vehicle_points:
-        layers.append(
-            pdk.Layer(
-                "ScatterplotLayer",
-                vehicle_points,
-                get_position="coordinates",
-                get_fill_color="halo_rgba",
-                get_radius="halo_radius",
-                pickable=False,
-            )
-        )
-        if active_vehicle_points:
-            layers.append(
-                pdk.Layer(
-                    "ScatterplotLayer",
-                    active_vehicle_points,
-                    get_position="coordinates",
-                    get_fill_color=[255, 255, 255, 0],
-                    get_line_color="border_rgba",
-                    get_line_width="emphasis_line_width",
-                    get_radius="emphasis_radius",
-                    stroked=True,
-                    filled=True,
-                    pickable=False,
-                )
-            )
-        layers.append(
-            pdk.Layer(
-                "ScatterplotLayer",
-                vehicle_points,
-                get_position="coordinates",
-                get_fill_color="fill_rgba",
-                get_line_color="border_rgba",
-                get_line_width="border_width",
-                get_radius="render_radius",
-                stroked=True,
-                filled=True,
-                pickable=True,
-            )
-        )
-    if request_origin_points:
-        if active_request_origin_points:
-            layers.append(
-                pdk.Layer(
-                    "ScatterplotLayer",
-                    active_request_origin_points,
-                    get_position="coordinates",
-                    get_fill_color=[255, 255, 255, 0],
-                    get_line_color="border_rgba",
-                    get_line_width="emphasis_line_width",
-                    get_radius="emphasis_radius",
-                    stroked=True,
-                    filled=True,
-                    pickable=False,
-                )
-            )
-        layers.append(
-            pdk.Layer(
-                "ScatterplotLayer",
-                request_origin_points,
-                get_position="coordinates",
-                get_fill_color="fill_rgba",
-                get_line_color="border_rgba",
-                get_line_width="border_width",
-                get_radius="render_radius",
-                stroked=True,
-                filled=True,
-                pickable=True,
-            )
-        )
-    if request_destination_points:
-        if active_request_destination_points:
-            layers.append(
-                pdk.Layer(
-                    "ScatterplotLayer",
-                    active_request_destination_points,
-                    get_position="coordinates",
-                    get_fill_color=[255, 255, 255, 0],
-                    get_line_color="border_rgba",
-                    get_line_width="emphasis_line_width",
-                    get_radius="emphasis_radius",
-                    stroked=True,
-                    filled=True,
-                    pickable=False,
-                )
-            )
-        layers.append(
-            pdk.Layer(
-                "ScatterplotLayer",
-                request_destination_points,
-                get_position="coordinates",
-                get_fill_color="fill_rgba",
-                get_line_color="border_rgba",
-                get_line_width="border_width",
-                get_radius="render_radius",
-                stroked=True,
-                filled=True,
-                pickable=True,
-            )
-        )
-    if request_origin_points:
-        layers.append(
-            pdk.Layer(
-                "TextLayer",
-                request_origin_points,
-                get_position="coordinates",
-                get_text="label",
-                get_color="text_rgba",
-                get_size=12 if compact else 14,
-                get_alignment_baseline="bottom",
-                get_text_anchor="start",
-                get_pixel_offset="label_offset",
-            )
-        )
-    if request_destination_points:
-        layers.append(
-            pdk.Layer(
-                "TextLayer",
-                request_destination_points,
-                get_position="coordinates",
-                get_text="label",
-                get_color="text_rgba",
-                get_size=12 if compact else 14,
-                get_alignment_baseline="bottom",
-                get_text_anchor="start",
-                get_pixel_offset="label_offset",
-            )
-        )
-        layers.append(
-            pdk.Layer(
-                "TextLayer",
-                vehicle_points,
-                get_position="coordinates",
-                get_text="label",
-                get_color="text_rgba",
-                get_size=12 if compact else 14,
-                get_alignment_baseline="bottom",
-                get_text_anchor="start",
-                get_pixel_offset="label_offset",
-            )
-        )
-
-    map_style = pdk.map_styles.CARTO_LIGHT
-
-    st.pydeck_chart(
-        pdk.Deck(
-            map_style=map_style,
-            initial_view_state=pdk.ViewState(latitude=avg_lat, longitude=avg_lon, zoom=zoom, pitch=0),
-            layers=layers,
-            tooltip={"text": "{label}"},
-        ),
-        use_container_width=True,
-    )
-    if show_supporting_info:
-        render_map_supporting_info(
-            payload,
-            "PyDeck 오픈 지도입니다. 요청 O/D, 도로망 경로, 실제 주행 누적 경로를 한 화면에서 비교할 수 있습니다.",
             compact=compact,
         )
 

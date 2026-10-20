@@ -149,29 +149,8 @@ def _resolve_request_snap_graph(config: dict, spatial_mode: str) -> LocalITSRoad
     if not bool(simulation_cfg.get("snap_generated_requests_to_road_network", True)):
         return None
 
-    configured_local_its_dataset = str(simulation_cfg.get("local_its_dataset", "")).strip()
-    dataset_path = configured_local_its_dataset or (
-        str(DEFAULT_LOCAL_ITS_GRAPH_DATASET) if Path(DEFAULT_LOCAL_ITS_GRAPH_DATASET).exists() else ""
-    )
-    if not dataset_path or not Path(dataset_path).exists():
-        return None
-
-    configured_geometry_dataset = str(simulation_cfg.get("local_its_geometry_dataset", "")).strip()
-    geometry_dataset_path = configured_geometry_dataset or (
-        str(DEFAULT_LOCAL_ITS_GEOMETRY_DATASET) if Path(DEFAULT_LOCAL_ITS_GEOMETRY_DATASET).exists() else ""
-    )
-    configured_node_dataset = str(simulation_cfg.get("local_its_node_dataset", "")).strip()
-    node_dataset_path = configured_node_dataset or (
-        str(DEFAULT_LOCAL_ITS_NODE_DATASET) if Path(DEFAULT_LOCAL_ITS_NODE_DATASET).exists() else ""
-    )
-    try:
-        return LocalITSRoadGraph(
-            dataset_path,
-            geometry_dataset_path=geometry_dataset_path,
-            node_dataset_path=node_dataset_path,
-        )
-    except Exception:
-        return None
+    from simulator.osm_routing import OSMRoutingService
+    return OSMRoutingService(simulation_cfg)
 
 
 def _snap_point_to_road_network(
@@ -182,13 +161,16 @@ def _snap_point_to_road_network(
     if road_graph is None:
         return list(candidate), {}
 
-    _, snapped_point, distance_meters = road_graph.nearest_node((float(candidate[0]), float(candidate[1])))
+    try:
+        _, snapped_point, distance_meters = road_graph.nearest_node((float(candidate[0]), float(candidate[1])))
+    except ValueError:
+        return None, {"status": "outside_osm_coverage", "requested": list(candidate)}
     metadata = {
         "requested": [float(candidate[0]), float(candidate[1])],
         "snapped": [float(snapped_point[0]), float(snapped_point[1])],
         "distance_meters": round(distance_meters, 2),
         "status": "snapped" if distance_meters <= max_snap_distance_meters else "too_far",
-        "strategy": "local_its_nearest_node",
+        "strategy": "osm_nearest_node",
     }
     if distance_meters > max_snap_distance_meters:
         return None, metadata

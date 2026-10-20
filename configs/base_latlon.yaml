@@ -1,19 +1,11 @@
 simulation:
   space_mode: latlon
-  routing_provider: local_its
+  routing_provider: osm
+  osm_average_speed_kph: 25.0
   max_time: 7200
   time_step: 30
-  traffic_update_interval: 300
-  use_prediction_traffic: true
   window_start: "2026-04-02 00:00:00"
   demand_window_minutes: 30
-  road_snap_max_distance_meters: 400.0
-  road_snap_dataset: ""
-  local_its_dataset: ""
-  local_its_average_speed_kph: 25.1
-  local_its_use_hourly_speed_profile: false
-  local_its_hourly_speed_kph: [28.8, 29.3, 29.7, 29.8, 29.8, 29.1, 26.3, 24.5, 23.4, 23.3, 23.0, 23.0, 23.2, 22.9, 22.6, 22.4, 22.0, 21.6, 21.7, 22.9, 24.7, 25.5, 26.2, 27.3]
-  local_its_allow_bidirectional_fallback: true
   random_seed: 42
 
 vehicles:
@@ -36,7 +28,4 @@ options:
   max_visible_requests: 10
 
 visualization:
-  map_provider: tmap
-
-integrations:
-  tmap_app_key: ""
+  map_provider: openstreetmap
