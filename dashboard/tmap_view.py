@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from html import escape
 from pathlib import Path
+from urllib.parse import urlencode
 
 
 def build_tmap_html(payload: dict, app_key: str, fallback_svg: str, compact: bool = False) -> str:
@@ -12,6 +14,10 @@ def build_tmap_html(payload: dict, app_key: str, fallback_svg: str, compact: boo
     data = data.replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e")
     script = Path(__file__).with_name("tmap_map.js").read_text(encoding="utf-8")
     height = 340 if compact else 520
+    # JS V2 로더는 document.write로 하위 SDK를 불러올 수 있습니다.
+    # 동적 appendChild 대신 HTML 파서가 읽는 정적 script 태그로 순서를 보장합니다.
+    sdk_url = "https://apis.openapi.sk.com/tmap/jsv2?" + urlencode({"version": "1", "appKey": app_key.strip()})
+    sdk_tag = f'<script src="{escape(sdk_url, quote=True)}"></script>' if app_key.strip() else ""
     return f'''<!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -31,5 +37,6 @@ def build_tmap_html(payload: dict, app_key: str, fallback_svg: str, compact: boo
 <div id="fallback" hidden>{fallback_svg}</div>
 <p id="notice">차량 · 요청 출발/도착 · 이동 경로를 표시합니다.</p>
 <script id="tmap-data" type="application/json">{data}</script>
+{sdk_tag}
 <script>{script}</script>
 </body></html>'''
