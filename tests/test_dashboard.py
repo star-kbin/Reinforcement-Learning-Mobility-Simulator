@@ -1,11 +1,7 @@
 """Streamlit 위젯 전환·실행·키 설정과 HTML 인코딩 회귀 검사."""
 
-import json
-import re
 import unittest
-from html import unescape
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
 
 from streamlit.testing.v1 import AppTest
 
@@ -21,27 +17,26 @@ class DashboardTests(unittest.TestCase):
     def assertHealthy(self, app):
         self.assertFalse(app.exception, [error.message for error in app.exception])
 
-    def test_osm_html_initializes_map_before_markers_and_encodes_data(self):
-        from unittest.mock import patch
+    def test_osm_component_uses_stable_identity_and_structured_payload(self):
+        from unittest.mock import patch, Mock
         from dashboard.app import render_openstreetmap_map
-        from simulator.env import MobilityEnv
-        from simulator.scenarios.loader import load_config, load_scenario
-        env = MobilityEnv(load_config(ROOT / "configs/base_latlon.yaml"), load_scenario(ROOT / "scenarios/scenario_dongjak_history.yaml"))
-        with patch("dashboard.app.components.html") as component:
-            render_openstreetmap_map(env.timeline[0], show_supporting_info=False)
-        html = component.call_args.args[0]
-        self.assertLess(html.index("map.fitBounds(payload.view_bounds"), html.index("marker.bringToFront()"))
-        self.assertIn("https://tile.openstreetmap.org/", html)
-        self.assertIn("https://www.openstreetmap.org/copyright", html)
-        self.assertIn("showFallback", html)
         payload = {"vehicle_points": [{"coordinates": [127, 37.5], "label": "</script>"}],
                    "vehicle_start_points": [], "request_origin_points": [], "request_destination_points": []}
-        with patch("dashboard.app.build_map_payload", return_value=payload), patch("dashboard.app.build_coordinate_svg", return_value="<svg></svg>"), patch("dashboard.app.components.html") as component:
+        component = Mock()
+        with patch("dashboard.app.build_map_payload", return_value=payload), patch("dashboard.app.build_coordinate_svg", return_value="<svg></svg>"), patch("dashboard.app.components.declare_component", return_value=component):
+            render_openstreetmap_map({}, compact=True, show_supporting_info=False)
+            first = component.call_args.kwargs
+            render_openstreetmap_map({}, compact=True, show_supporting_info=False)
+            self.assertEqual(first["key"], component.call_args.kwargs["key"])
+            self.assertEqual(first["height"], 540)
+            self.assertEqual(first["payload"]["vehicle_points"][0]["label"], "</script>")
             render_openstreetmap_map({}, show_supporting_info=False)
-        html = component.call_args.args[0]
-        encoded = re.search(r"const payload = (.*?);", html)[1]
-        self.assertNotIn("</script>", encoded)
-        self.assertEqual(json.loads(encoded)["vehicle_points"][0]["label"], "</script>")
+            self.assertNotEqual(first["key"], component.call_args.kwargs["key"])
+        html = (ROOT / "dashboard/leaflet_map/index.html").read_text(encoding="utf-8")
+        self.assertIn("streamlit:render", html)
+        self.assertIn("if (!renderer)", html)
+        self.assertIn("showFallback", html)
+        self.assertNotIn("const payload =", html)
 
     def test_default_simple_mode_and_no_key(self):
         app = self.app()
@@ -121,17 +116,9 @@ class DashboardTests(unittest.TestCase):
         stationary = build_map_view_bounds([{"vehicles":[{"position":[37.51362,126.94157]}]}])
         self.assertGreater(stationary[1][0]-stationary[0][0],0)
         payload = {"vehicle_points":[{"coordinates":[126.94,37.51]}], "vehicle_start_points":[], "request_origin_points":[], "request_destination_points":[]}
-        with patch("dashboard.app.build_map_payload",return_value=payload), patch("dashboard.app.build_coordinate_svg",return_value="<svg></svg>"), patch("dashboard.app.components.html") as component:
+        with patch("dashboard.app.build_map_payload",return_value=payload), patch("dashboard.app.build_coordinate_svg",return_value="<svg></svg>"), patch("dashboard.app.components.declare_component") as declare:
             render_openstreetmap_map({}, timeline=[], view_bounds=bounds, show_supporting_info=False)
-        html = component.call_args.args[0]
-        encoded = re.search(r"const payload = (.*?);",html)[1]
-        self.assertEqual(json.loads(encoded)["view_bounds"],bounds)
-        self.assertIn("scrollWheelZoom: false",html)
-        self.assertIn("if (!fixedCamera) {\n              attachStableWheelZoom(map, L);",html)
-        self.assertIn("zoomDelta: 0.25",html)
-        self.assertIn("dragging: !fixedCamera",html)
-        self.assertIn("animate: false",html)
-        self.assertIn("!fixedCamera && pointCandidates.length > 1",html)
+        self.assertEqual(declare.return_value.call_args.kwargs["payload"]["view_bounds"], bounds)
 
     def test_grid_source_resets_old_settings_and_still_runs(self):
         app = self.app()

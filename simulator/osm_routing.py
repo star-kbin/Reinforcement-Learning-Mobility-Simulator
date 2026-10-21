@@ -24,6 +24,39 @@ def load_osm_graph(path: str = str(DEFAULT_GRAPH)) -> dict:
     # Only nodes that can depart AND arrive are candidates for endpoint snapping.
     incoming = {b for _, b in graph['edges']}
     graph['snap_nodes'] = [i for i, edges in enumerate(adjacency) if edges and i in incoming]
+    # Iterative Kosaraju: generated endpoints in one strongly connected component
+    # can all reach each other, including after a vehicle finishes another trip.
+    reverse = [[] for _ in adjacency]
+    for a, b in graph['edges']:
+        reverse[b].append(a)
+    seen = set()
+    order = []
+    for root in range(len(adjacency)):
+        if root in seen:
+            continue
+        stack = [(root, False)]
+        while stack:
+            node, finished = stack.pop()
+            if finished:
+                order.append(node)
+            elif node not in seen:
+                seen.add(node)
+                stack.append((node, True))
+                stack.extend((nxt, False) for nxt, _ in adjacency[node] if nxt not in seen)
+    components = [-1] * len(adjacency)
+    component_id = 0
+    for root in reversed(order):
+        if components[root] != -1:
+            continue
+        stack = [root]
+        components[root] = component_id
+        while stack:
+            for nxt in reverse[stack.pop()]:
+                if components[nxt] == -1:
+                    components[nxt] = component_id
+                    stack.append(nxt)
+        component_id += 1
+    graph['components'] = components
     return graph
 
 class OSMRoutingError(ValueError):
@@ -50,6 +83,10 @@ class OSMRoutingService(BaseRoutingService):
         candidates = [(d,i) for d,i in candidates if d <= self.snap_limit]
         if not candidates:
             raise OSMRoutingError(f'좌표 {point}에서 {self.snap_limit:g}m 이내 자동차 도로를 찾지 못했습니다.')
+        # An endpoint already on a graph node must not jump to a nearby, disconnected
+        # road or skip a one-way restriction via an artificial access connector.
+        if candidates[0][0] < 1e-6:
+            candidates = candidates[:1]
         self.snap_cache[point] = candidates
         return candidates
 
