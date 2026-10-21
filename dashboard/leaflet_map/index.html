@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <style>
+    html,body { margin:0; padding:0; font-family:Arial,sans-serif; }
+    #map { width:100%; height:540px; }
+    #fallback { display:none; color:#854d0e; background:#fef9c3; }
+    #fallback p { padding:10px; margin:0; }
+    .vehicle-tooltip { font-weight:bold; color:#0f172a; }
+    .vehicle-label { border:3px solid white; border-radius:20px; padding:3px 7px;
+      color:white; font-weight:bold; font-size:12px; white-space:nowrap; }
+  </style>
+</head>
+<body>
+  <div id="fallback"><p role="status"></p><div id="coordinates"></div></div>
+  <div id="map" aria-label="차량과 요청 위치 지도"></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="map_controls.js"></script>
+  <script src="map.js"></script>
+  <script>
+    const mapDiv = document.getElementById('map');
+    const fallback = document.getElementById('fallback');
+    let renderer;
+    let tileLoaded = false;
+    function send(type, extra) {
+      window.parent.postMessage({isStreamlitMessage:true, type, ...extra}, '*');
+    }
+    function showFallback(reason) {
+      fallback.querySelector('p').textContent = reason;
+      fallback.style.display = 'block';
+      mapDiv.style.display = 'none';
+    }
+    window.addEventListener('message', event => {
+      if (event.source !== window.parent || event.data.type !== 'streamlit:render') return;
+      const args = event.data.args;
+      mapDiv.style.height = args.height + 'px';
+      document.getElementById('coordinates').innerHTML = args.fallback_svg;
+      send('streamlit:setFrameHeight', {height:args.height});
+      if (!window.L) {
+        showFallback('Leaflet 리소스를 불러오지 못해 좌표 보기로 전환했습니다.');
+        return;
+      }
+      if (!renderer) {
+        renderer = createMobilityMap(L, mapDiv, attachStableWheelZoom);
+        let errors = 0;
+        renderer.tiles.on('tileload', () => {
+          tileLoaded = true;
+          fallback.style.display = 'none';
+          const hidden = mapDiv.style.display === 'none';
+          mapDiv.style.display = 'block';
+          if (hidden) renderer.map.invalidateSize({pan:false});
+        });
+        renderer.tiles.on('tileerror', () => {
+          if (!tileLoaded && ++errors >= 4) showFallback('지도 타일을 불러오지 못해 좌표 보기로 전환했습니다.');
+        });
+        window.setTimeout(() => {
+          if (!tileLoaded) showFallback('지도 응답이 없어 좌표 보기로 전환했습니다.');
+        }, 15000);
+      }
+      renderer.update(args.payload, args.view_id, args.compact);
+    });
+    window.addEventListener('unload', () => { if (renderer) renderer.destroy(); });
+    send('streamlit:componentReady', {apiVersion:1});
+  </script>
+</body>
+</html>

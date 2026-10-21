@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync(require.resolve('../dashboard/map_controls.js'), 'utf8');
+const source = fs.readFileSync(require.resolve('../dashboard/leaflet_map/map_controls.js'), 'utf8');
 
 function setup(initialZoom = 13) {
   let now = 0, serial = 0, zoom = initialZoom;

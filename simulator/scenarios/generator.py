@@ -5,16 +5,10 @@ from __future__ import annotations
 import copy
 import json
 import math
-from pathlib import Path
 import random
 from typing import Any
 
-from simulator.routing import (
-    DEFAULT_LOCAL_ITS_GEOMETRY_DATASET,
-    DEFAULT_LOCAL_ITS_GRAPH_DATASET,
-    DEFAULT_LOCAL_ITS_NODE_DATASET,
-    LocalITSRoadGraph,
-)
+from simulator.osm_routing import OSMRoutingService, OSMRoutingError
 
 
 DEFAULT_LATLON_START_LABEL = "노량진역 앞 (서울특별시 동작구)"
@@ -48,6 +42,10 @@ def ensure_vehicle_positions(
     last_position = normalize_coordinate_pair(default_position, resolved_spatial_mode, default_position)
     for index in range(resolved_vehicle_count):
         candidate = configured_positions[index] if index < len(configured_positions) else last_position
+        if resolved_spatial_mode == "latlon" and index >= len(configured_positions) and index > 0:
+            service = OSMRoutingService(config.get("simulation", {}))
+            pool = _accessible_road_nodes(service, positions, default_request_generation_radius("latlon"))
+            candidate = random.Random(int(config.get("simulation", {}).get("random_seed", 42)) + index).choice(pool)
         normalized = normalize_coordinate_pair(candidate, resolved_spatial_mode, default_position)
         positions.append(normalized)
         last_position = normalized
@@ -142,40 +140,60 @@ def random_wait_time_bounds(max_time: int, time_step: int) -> tuple[int, int]:
     return min_wait, max_wait
 
 
-def _resolve_request_snap_graph(config: dict, spatial_mode: str) -> LocalITSRoadGraph | None:
-    if spatial_mode != "latlon":
-        return None
+def _accessible_road_nodes(service: OSMRoutingService, anchors: list[list[float]], radius: float) -> list[list[float]]:
+    if not math.isfinite(radius) or radius < 0:
+        raise OSMRoutingError("생성 반경은 0 이상의 유한한 수여야 합니다.")
+    indices = [service.nearest_node(anchor)[0] for anchor in anchors]
+    labels = service.graph["components"]
+    component = labels[indices[0]]
+    if any(labels[index] != component for index in indices):
+        raise OSMRoutingError("차량 시작점들이 서로 왕복 가능한 OSM 도로망에 있지 않습니다. 시작 위치를 수정해 주세요.")
+    pool = [list(service.graph["nodes"][index]) for index in service.graph["snap_nodes"]
+            if labels[index] == component and any(
+                approx_point_distance(service.graph["nodes"][index], anchor, "latlon") <= radius for anchor in anchors)]
+    if len(pool) < 2:
+        raise OSMRoutingError("생성 반경 안에 서로 접근 가능한 도로 지점이 부족합니다. 반경을 늘리거나 시작 위치를 수정해 주세요.")
+    return pool
 
-    simulation_cfg = config.get("simulation", {})
-    if not bool(simulation_cfg.get("snap_generated_requests_to_road_network", True)):
-        return None
 
-    from simulator.osm_routing import OSMRoutingService
-    return OSMRoutingService(simulation_cfg)
-
-
-def _snap_point_to_road_network(
-    candidate: list[float],
-    road_graph: LocalITSRoadGraph | None,
-    max_snap_distance_meters: float,
-) -> tuple[list[float] | None, dict[str, Any]]:
-    if road_graph is None:
-        return list(candidate), {}
-
-    try:
-        _, snapped_point, distance_meters = road_graph.nearest_node((float(candidate[0]), float(candidate[1])))
-    except ValueError:
-        return None, {"status": "outside_osm_coverage", "requested": list(candidate)}
-    metadata = {
-        "requested": [float(candidate[0]), float(candidate[1])],
-        "snapped": [float(snapped_point[0]), float(snapped_point[1])],
-        "distance_meters": round(distance_meters, 2),
-        "status": "snapped" if distance_meters <= max_snap_distance_meters else "too_far",
-        "strategy": "osm_nearest_node",
-    }
-    if distance_meters > max_snap_distance_meters:
-        return None, metadata
-    return [float(snapped_point[0]), float(snapped_point[1])], metadata
+def _generate_road_requests(vehicle_positions, request_count, config, seed, radius, fixed_max_wait_time):
+    service = OSMRoutingService(config.get("simulation", {}))
+    anchors = vehicle_positions or [list(DEFAULT_LATLON_START)]
+    pool = _accessible_road_nodes(service, anchors, radius)
+    rng = random.Random(seed)
+    max_time = max(1, int(config.get("simulation", {}).get("max_time", 1)))
+    time_step = max(1, int(config.get("simulation", {}).get("time_step", 1)))
+    wait_min, wait_max = random_wait_time_bounds(max_time, time_step)
+    created_times = sorted(rng.sample(range(max_time), request_count)) if request_count <= max_time else sorted(
+        rng.randrange(max_time) for _ in range(request_count))
+    used = []
+    requests = []
+    min_gap = max(35., radius * .18)
+    for index in range(request_count):
+        # Crowding may relax spacing, but never road access or the generation radius.
+        origins = [p for p in pool if all(approx_point_distance(p, old, "latlon") >= min_gap for old in used)]
+        origin = rng.choice(origins or pool)
+        destinations = [p for p in pool if p != origin]
+        spaced = [p for p in destinations if approx_point_distance(p, origin, "latlon") >= max(60., min_gap * 1.5)
+                  and all(approx_point_distance(p, old, "latlon") >= min_gap for old in used)]
+        destination = rng.choice(spaced or destinations)
+        # Verify directed routes as well as the shared-component guarantee.
+        service.plan_route(origin, destination, 1, time_step)
+        for anchor in anchors:
+            service.plan_route(anchor, origin, 1, time_step)
+            service.plan_route(destination, anchor, 1, time_step)
+        used.extend([origin, destination])
+        road_snap = {role: {"requested": list(point), "snapped": list(point), "distance_meters": 0.,
+                            "status": "on_road", "strategy": "osm_accessible_node"}
+                     for role, point in (("origin", origin), ("destination", destination))}
+        requests.append({"request_id": f"R{index+1}", "created_at": created_times[index],
+                         "origin": list(origin), "destination": list(destination),
+                         "max_wait_time": int(fixed_max_wait_time) if fixed_max_wait_time is not None else rng.randint(wait_min, wait_max),
+                         "metadata": {"generated": True, "anchor_vehicle_index": index % len(anchors) + 1,
+                                      "generation_seed": seed, "generation_radius": radius,
+                                      "road_snap": road_snap, "route_accessibility_validated": True,
+                                      "spacing_relaxed": not origins or not spaced}})
+    return requests
 
 
 def generate_random_requests(
@@ -187,9 +205,11 @@ def generate_random_requests(
     radius: float,
     fixed_max_wait_time: int | None = None,
 ) -> list[dict]:
+    if request_count <= 0:
+        return []
+    if spatial_mode == "latlon":
+        return _generate_road_requests(vehicle_positions, request_count, config, seed, radius, fixed_max_wait_time)
     rng = random.Random(seed)
-    road_graph = _resolve_request_snap_graph(config, spatial_mode)
-    snap_max_distance_meters = float(config.get("simulation", {}).get("road_snap_max_distance_meters", 400.0))
     normalized_vehicle_positions = [
         normalize_coordinate_pair(
             position,
@@ -215,91 +235,8 @@ def generate_random_requests(
     used_points: list[list[float]] = []
     requests: list[dict] = []
     for index in range(request_count):
-        origin = None
-        origin_snap_meta: dict[str, Any] = {}
-        for _ in range(240):
-            origin_candidate = find_non_overlapping_point(
-                normalized_vehicle_positions,
-                used_points,
-                radius,
-                min_gap,
-                spatial_mode,
-                rng,
-                config,
-            )
-            snapped_origin, origin_snap_meta = _snap_point_to_road_network(
-                origin_candidate,
-                road_graph,
-                snap_max_distance_meters,
-            )
-            if snapped_origin is None:
-                continue
-            if all(approx_point_distance(snapped_origin, existing, spatial_mode) >= min_gap for existing in used_points):
-                origin = snapped_origin
-                break
-        if origin is None:
-            fallback_origin = find_non_overlapping_point(
-                normalized_vehicle_positions,
-                used_points,
-                radius,
-                min_gap,
-                spatial_mode,
-                rng,
-                config,
-            )
-            snapped_origin, origin_snap_meta = _snap_point_to_road_network(
-                fallback_origin,
-                road_graph,
-                max(snap_max_distance_meters, 10_000.0),
-            )
-            origin = snapped_origin or fallback_origin
-
-        destination = None
-        destination_snap_meta: dict[str, Any] = {}
-        destination_used_points = [*used_points, origin]
-        for _ in range(240):
-            destination_candidate = find_non_overlapping_point(
-                normalized_vehicle_positions,
-                destination_used_points,
-                radius,
-                trip_gap,
-                spatial_mode,
-                rng,
-                config,
-            )
-            snapped_destination, destination_snap_meta = _snap_point_to_road_network(
-                destination_candidate,
-                road_graph,
-                snap_max_distance_meters,
-            )
-            if snapped_destination is None:
-                continue
-            if (
-                approx_point_distance(origin, snapped_destination, spatial_mode) >= trip_gap
-                and all(
-                    approx_point_distance(snapped_destination, existing, spatial_mode) >= min_gap
-                    for existing in destination_used_points
-                )
-            ):
-                destination = snapped_destination
-                break
-        if destination is None:
-            fallback_destination = find_non_overlapping_point(
-                normalized_vehicle_positions,
-                destination_used_points,
-                radius,
-                trip_gap,
-                spatial_mode,
-                rng,
-                config,
-            )
-            snapped_destination, destination_snap_meta = _snap_point_to_road_network(
-                fallback_destination,
-                road_graph,
-                max(snap_max_distance_meters, 10_000.0),
-            )
-            destination = snapped_destination or fallback_destination
-
+        origin = find_non_overlapping_point(normalized_vehicle_positions, used_points, radius, min_gap, spatial_mode, rng, config)
+        destination = find_non_overlapping_point(normalized_vehicle_positions, [*used_points, origin], radius, trip_gap, spatial_mode, rng, config)
         used_points.extend([origin, destination])
         max_wait_time = (
             int(fixed_max_wait_time)
@@ -319,11 +256,6 @@ def generate_random_requests(
                 "generation_radius": float(radius),
             },
         }
-        if origin_snap_meta or destination_snap_meta:
-            request_payload["metadata"]["road_snap"] = {
-                "origin": origin_snap_meta,
-                "destination": destination_snap_meta,
-            }
         requests.append(request_payload)
 
     return requests

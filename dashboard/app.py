@@ -1167,11 +1167,15 @@ def main() -> None:
         ensure_ascii=False,
         sort_keys=True,
     )
-    if advanced_settings:
-        config, scenario = build_dashboard_inputs(base_config, base_scenario, editor_source_signature, True)
-    else:
-        with st.sidebar:
-            config, scenario = build_dashboard_inputs(base_config, base_scenario, editor_source_signature, False)
+    try:
+        if advanced_settings:
+            config, scenario = build_dashboard_inputs(base_config, base_scenario, editor_source_signature, True)
+        else:
+            with st.sidebar:
+                config, scenario = build_dashboard_inputs(base_config, base_scenario, editor_source_signature, False)
+    except ValueError as exc:
+        st.error(f"차량·수요 생성 위치를 확인해 주세요: {exc}")
+        st.stop()
     config.pop("integrations", None)
     if detect_spatial_mode(config, scenario) == "latlon":
         config["simulation"]["routing_provider"] = "osm"
@@ -1255,6 +1259,8 @@ def main() -> None:
         except ValueError as exc:
             st.error(f"경로 또는 입력을 확인해 주세요: {exc}")
             st.stop()
+        st.session_state["dashboard_map_run_id"] = uuid.uuid4().hex
+        _stop_dashboard_autoplay()
         st.session_state["dashboard_result"] = result
         st.session_state["dashboard_config"] = copy.deepcopy(config)
         st.session_state["dashboard_scenario"] = copy.deepcopy(scenario)
@@ -1557,7 +1563,7 @@ def build_editable_inputs(base_config: dict, base_scenario: dict, source_signatu
         )
         edited_positions: list[list[float]] = []
         st.caption(
-            "기본 시작 위치는 노량진역 앞 기본 좌표로 채워집니다. 차량 수를 늘리면 마지막으로 입력한 좌표를 복사해 새 차량 시작 위치에 사용합니다."
+            "기본 시작 위치는 노량진역 앞입니다. 추가 차량은 기존 시작점 주변의 접근 가능한 OSM 도로에 배치합니다."
             if spatial_mode == "latlon"
             else "기본 시작 위치는 첫 번째 수요 발생 위치로 채워집니다. 차량 수를 늘리면 마지막으로 입력한 좌표를 복사해 새 차량 시작 위치에 사용합니다."
         )
@@ -3728,6 +3734,12 @@ def build_default_vehicle_positions(
             candidate = list(last_position)
         else:
             candidate = configured_positions[index] if index < len(configured_positions) else last_position
+        if spatial_mode == "latlon" and index > 0 and (
+            index >= len(configured_positions) or (previous_vehicle_count > 0 and index >= previous_vehicle_count)
+        ):
+            generated_config = copy.deepcopy(config)
+            generated_config["vehicles"]["initial_positions"] = default_positions
+            candidate = shared_ensure_vehicle_positions(generated_config, index + 1, spatial_mode)[-1]
         resolved_position = _read_vehicle_position(index, spatial_mode, candidate, default_position)
         default_positions.append(resolved_position)
         last_position = resolved_position
@@ -4714,474 +4726,20 @@ def render_openstreetmap_map(
         st.info("지도에 표시할 좌표 데이터가 없습니다.")
         return
 
-    map_div_id = f"osm_{uuid.uuid4().hex}"
-    fallback_div_id = f"osm_fallback_{uuid.uuid4().hex}"
-    height = 340 if compact else 520
-    component_height = height + (72 if compact else 88)
-    fallback_svg = build_coordinate_svg(payload, compact=compact, include_intro=False)
-    map_controls_js = (Path(__file__).with_name("map_controls.js")).read_text(encoding="utf-8")
-    html = f"""
-    <!doctype html>
-    <html>
-      <head>
-        <meta charset="utf-8" />
-        <link
-          rel="stylesheet"
-          href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-          crossorigin=""
-        />
-        <style>
-          html, body, #{map_div_id} {{
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: {height}px;
-          }}
-          #{fallback_div_id} {{
-            display: none;
-          }}
-          .marker-origin {{
-            min-width: 22px;
-            height: 20px;
-            padding: 0 6px;
-            border-radius: 999px;
-            background: #f59e0b;
-            border: 2px solid white;
-            color: white;
-            font-size: 11px;
-            font-weight: 700;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 1px 6px rgba(0,0,0,0.25);
-          }}
-          .marker-destination {{
-            min-width: 22px;
-            height: 20px;
-            padding: 0 6px;
-            background: #2563eb;
-            border: 2px solid white;
-            color: white;
-            font-size: 11px;
-            font-weight: 700;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 1px 6px rgba(0,0,0,0.25);
-          }}
-          .leaflet-container {{
-            font-family: Arial, sans-serif;
-          }}
-          @keyframes markerPulse {{
-            0% {{
-              transform: scale(1);
-              opacity: 0.88;
-            }}
-            50% {{
-              transform: scale(1.1);
-              opacity: 1;
-            }}
-            100% {{
-              transform: scale(1);
-              opacity: 0.88;
-            }}
-          }}
-          .vehicle-tooltip {{
-            background: rgba(255,255,255,0.96);
-            border: 1px solid rgba(15, 23, 42, 0.12);
-            color: #0f172a;
-            font-size: 11px;
-            font-weight: 700;
-            box-shadow: 0 1px 6px rgba(0,0,0,0.12);
-          }}
-          .vehicle-popup {{
-            min-width: 210px;
-            color: #0f172a;
-            font-size: 12px;
-            line-height: 1.45;
-          }}
-          .vehicle-popup-title {{
-            margin-bottom: 8px;
-            font-size: 13px;
-            font-weight: 800;
-          }}
-          .vehicle-popup-grid {{
-            display: grid;
-            grid-template-columns: auto 1fr;
-            gap: 4px 10px;
-          }}
-          .vehicle-popup-grid dt {{
-            margin: 0;
-            color: #64748b;
-            font-weight: 700;
-          }}
-          .vehicle-popup-grid dd {{
-            margin: 0;
-            color: #0f172a;
-            font-weight: 600;
-          }}
-          .request-origin-tooltip {{
-            background: rgba(245, 158, 11, 0.96);
-            border: 1px solid rgba(180, 83, 9, 0.28);
-            color: white;
-            font-size: 11px;
-            font-weight: 700;
-            box-shadow: 0 1px 6px rgba(0,0,0,0.12);
-          }}
-          .request-destination-tooltip {{
-            background: rgba(37, 99, 235, 0.96);
-            border: 1px solid rgba(29, 78, 216, 0.28);
-            color: white;
-            font-size: 11px;
-            font-weight: 700;
-            box-shadow: 0 1px 6px rgba(0,0,0,0.12);
-          }}
-          .request-origin-dot {{
-            width: 12px;
-            height: 12px;
-            border-radius: 999px;
-            background: #f59e0b;
-            border: 2px solid white;
-            box-shadow: 0 1px 6px rgba(0,0,0,0.25);
-          }}
-          .request-destination-dot {{
-            width: 12px;
-            height: 12px;
-            background: #2563eb;
-            border: 2px solid white;
-            box-shadow: 0 1px 6px rgba(0,0,0,0.25);
-          }}
-        </style>
-      </head>
-      <body>
-        <div id="{fallback_div_id}">
-          <div style="margin-bottom:8px;padding:8px 10px;border:1px solid #facc15;border-radius:10px;background:#fef9c3;color:#854d0e;font-size:12px;">
-            <strong>OpenStreetMap 로드 실패</strong>
-            <div data-fallback-reason style="margin-top:4px;">외부 지도 리소스를 불러오지 못해 좌표 검증 뷰로 전환했습니다.</div>
-          </div>
-          {fallback_svg}
-        </div>
-        <div id="{map_div_id}"></div>
-        <script
-          src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-          crossorigin=""
-        ></script>
-        <script>
-          {map_controls_js}
-          const payload = {json.dumps(payload, ensure_ascii=False).replace(chr(60), chr(92) + "u003c")};
-          const vehicleCoreRadius = {8 if compact else 11};
-          const vehicleHaloRadius = {13 if compact else 19};
-          const vehicleHaloOpacity = {0.18 if compact else 0.24};
-          const vehicleLabelMinWidth = {24 if compact else 30};
-          const vehicleLabelHeight = {20 if compact else 24};
-          const vehicleLabelFontSize = {11 if compact else 12};
-          const fallbackDiv = document.getElementById("{fallback_div_id}");
-          const fallbackReason = fallbackDiv.querySelector("[data-fallback-reason]");
-          const mapDiv = document.getElementById("{map_div_id}");
-          const pointCandidates = [
-            ...payload.vehicle_points.map(p => p.coordinates),
-            ...payload.vehicle_start_points.map(p => p.coordinates),
-            ...payload.request_origin_points.map(p => p.coordinates),
-            ...payload.request_destination_points.map(p => p.coordinates)
-          ];
-
-          function showFallback(message) {{
-            if (message && fallbackReason) {{
-              fallbackReason.textContent = message;
-            }}
-            fallbackDiv.style.display = "block";
-            mapDiv.style.display = "none";
-          }}
-
-          function showMap() {{
-            const wasHidden = mapDiv.style.display === "none";
-            fallbackDiv.style.display = "none";
-            mapDiv.style.display = "block";
-            if (wasHidden) window.dispatchEvent(new Event("resize"));
-          }}
-
-          if (!window.L) {{
-            showFallback("Leaflet 리소스를 불러오지 못해 좌표 검증 뷰로 전환했습니다.");
-          }} else {{
-            const fixedCamera = Boolean(payload.view_bounds);
-            const map = L.map("{map_div_id}", {{
-              zoomControl: !fixedCamera,
-              scrollWheelZoom: false,
-              zoomSnap: 0.25,
-              zoomDelta: 0.25,
-              dragging: !fixedCamera,
-              touchZoom: !fixedCamera,
-              doubleClickZoom: false,
-              boxZoom: !fixedCamera,
-              keyboard: !fixedCamera,
-              zoomAnimation: false,
-              fadeAnimation: false,
-              markerZoomAnimation: false
-            }});
-            if (fixedCamera) {{
-              map.fitBounds(payload.view_bounds, {{ padding: [40, 40], maxZoom: 16, animate: false }});
-            }} else {{
-              map.setView([{DEFAULT_LATLON_START[0]}, {DEFAULT_LATLON_START[1]}], 13);
-            }}
-
-            if (!fixedCamera) {{
-              attachStableWheelZoom(map, L);
-            }}
-
-            const tileLayer = L.tileLayer("https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
-              maxZoom: 19,
-              attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
-            }}).addTo(map);
-
-            let tileLoaded = false;
-            let tileErrors = 0;
-            tileLayer.on("tileload", () => {{
-              tileLoaded = true;
-              showMap();
-            }});
-            tileLayer.on("tileerror", () => {{
-              tileErrors += 1;
-              if (!tileLoaded && tileErrors >= 4) {{
-                showFallback("OpenStreetMap 타일을 불러오지 못해 좌표 검증 뷰로 전환했습니다.");
-              }}
-            }});
-            window.setTimeout(() => {{
-              if (!tileLoaded) {{
-                showFallback("외부 지도 타일 응답이 없어 좌표 검증 뷰로 전환했습니다.");
-              }}
-            }}, 15000);
-
-            function addPath(path, options, label) {{
-              if (!path || path.length < 2) {{
-                return;
-              }}
-              const latlngs = path.map(p => [p[1], p[0]]);
-              L.polyline(latlngs, options)
-                .addTo(map)
-                .bindPopup(label || "");
-              latlngs.forEach(p => pointCandidates.push([p[1], p[0]]));
-            }}
-
-            function tooltipDirection(offset) {{
-              if (!offset) {{
-                return "top";
-              }}
-              if (Math.abs(offset[0]) > Math.abs(offset[1])) {{
-                return offset[0] >= 0 ? "right" : "left";
-              }}
-              return offset[1] >= 0 ? "bottom" : "top";
-            }}
-
-            function escapeHtml(value) {{
-              return String(value ?? "")
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;")
-                .replace(/"/g, "&quot;")
-                .replace(/'/g, "&#39;");
-            }}
-
-            function buildVehiclePopup(point) {{
-              const rows = [
-                ["차량", point.label || "-"],
-                ["실제 ID", point.vehicle_id || "-"],
-                ["상태", point.status || "-"],
-                ["탑승 / 용량", `${{point.current_load ?? 0}} / ${{point.capacity ?? "-"}}`],
-                ["배정 요청", point.assigned_request_id || "-"],
-                ["완료 요청", point.completed_request_count ?? 0],
-                ["누적 실주행", point.actual_distance_km != null ? `${{Number(point.actual_distance_km).toFixed(2)}} km` : "-"],
-                ["현재 위치", point.position_text || "-"]
-              ];
-              if (point.active_route_source) {{
-                rows.push(["경로 출처", point.active_route_source]);
-              }}
-              if (point.completed_request_ids && point.completed_request_ids.length) {{
-                rows.push(["완료 ID", point.completed_request_ids.join(", ")]);
-              }}
-              const body = rows
-                .map(([label, value]) => `<dt>${{escapeHtml(label)}}</dt><dd>${{escapeHtml(value)}}</dd>`)
-                .join("");
-              return (
-                `<div class="vehicle-popup">` +
-                `<div class="vehicle-popup-title" style="color:${{escapeHtml(point.color_hex || "#0f172a")}};">${{escapeHtml(point.label || point.vehicle_id || "차량")}}</div>` +
-                `<dl class="vehicle-popup-grid">${{body}}</dl>` +
-                `</div>`
-              );
-            }}
-
-            function addCircle(point, options, label, tooltipText, tooltipClass) {{
-              const latlng = [point.coordinates[1], point.coordinates[0]];
-              const marker = L.circleMarker(latlng, options)
-                .addTo(map)
-                .bindPopup(label || "");
-              if (tooltipText) {{
-                const offset = point.label_offset || [0, -10];
-                marker.bindTooltip(tooltipText, {{
-                  permanent: true,
-                  direction: tooltipDirection(offset),
-                  offset: offset,
-                  className: tooltipClass || "vehicle-tooltip"
-                }});
-              }}
-              pointCandidates.push(point.coordinates);
-            }}
-
-            function addDivMarker(point) {{
-              const isSquare = point.marker_shape === "square";
-              const sizeScale = Number(point.size_scale || 1);
-              const markerSize = Math.max(9, Math.round(12 * sizeScale));
-              const markerBorder = Math.max(2, Number(point.border_width || 2));
-              const pulseStyle = point.pulse ? "animation:markerPulse 1.05s ease-in-out infinite;" : "";
-              const icon = L.divIcon({{
-                html: `
-                  <div style="
-                    width:${{markerSize}}px;
-                    height:${{markerSize}}px;
-                    border-radius:${{isSquare ? "2px" : "999px"}};
-                    background:${{point.fill_hex || point.color_hex || "#f59e0b"}};
-                    border:${{markerBorder}}px solid ${{point.border_hex || "#ffffff"}};
-                    box-shadow:0 1px 6px rgba(0,0,0,0.25);
-                    ${{pulseStyle}}
-                  "></div>
-                `,
-                className: "",
-                iconAnchor: [markerSize / 2, markerSize / 2]
-              }});
-              const latlng = [point.coordinates[1], point.coordinates[0]];
-              const role = isSquare ? "목적지" : "출발지";
-              const requestName = point.request_id || point.label || "-";
-              const marker = L.marker(latlng, {{ icon }}).addTo(map);
-              marker.bindPopup(escapeHtml(role + " · " + requestName));
-              marker.bindTooltip(escapeHtml(role + " · " + requestName), {{
-                permanent: false,
-                direction: "top",
-                offset: [0, -markerSize / 2 - 4],
-                className: "vehicle-tooltip"
-              }});
-              pointCandidates.push(point.coordinates);
-            }}
-
-            function addVehicle(point) {{
-              const latlng = [point.coordinates[1], point.coordinates[0]];
-              L.circleMarker(latlng, {{
-                radius: vehicleHaloRadius,
-                color: point.color_hex,
-                weight: 2,
-                opacity: 0.68,
-                fillColor: point.color_hex,
-                fillOpacity: vehicleHaloOpacity,
-                interactive: false
-              }}).addTo(map);
-              if (point.pulse) {{
-                L.circleMarker(latlng, {{
-                  radius: vehicleHaloRadius + 4,
-                  color: point.border_hex || point.color_hex,
-                  weight: Math.max(3, (point.border_width || 4) - 1),
-                  opacity: 0.45,
-                  fillOpacity: 0,
-                  interactive: false
-                }}).addTo(map);
-              }}
-              const marker = L.circleMarker(latlng, {{
-                radius: vehicleCoreRadius,
-                color: point.border_hex || "#ffffff",
-                weight: point.border_width || 3,
-                fillColor: point.fill_hex || point.color_hex,
-                fillOpacity: 0.95
-              }});
-              marker.addTo(map).bindPopup(buildVehiclePopup(point));
-              marker.bringToFront();
-
-              const offset = point.label_offset || [0, -10];
-              const labelIcon = L.divIcon({{
-                className: "",
-                iconAnchor: [0, 0],
-                html: `
-                  <div style="transform: translate(${{offset[0]}}px, ${{offset[1]}}px);">
-                    <div style="
-                      display:inline-flex;
-                      align-items:center;
-                      justify-content:center;
-                      min-width:${{vehicleLabelMinWidth}}px;
-                      height:${{vehicleLabelHeight}}px;
-                      padding:0 6px;
-                      border-radius:999px;
-                      background:${{point.color_hex}};
-                      border:${{Math.max(3, point.border_width || 3)}}px solid ${{point.border_hex || "rgba(255,255,255,0.98)"}};
-                      color:#ffffff;
-                      font-size:${{vehicleLabelFontSize}}px;
-                      font-weight:800;
-                      box-shadow:0 2px 10px rgba(15,23,42,0.28);
-                      white-space:nowrap;
-                      ${{point.pulse ? "animation:markerPulse 1.05s ease-in-out infinite;" : ""}}
-                    ">
-                      ${{escapeHtml(point.label)}}
-                    </div>
-                  </div>
-                `
-              }});
-              L.marker(latlng, {{
-                icon: labelIcon,
-                interactive: false,
-                keyboard: false,
-                zIndexOffset: 900,
-              }}).addTo(map);
-              pointCandidates.push(point.coordinates);
-            }}
-
-            // O/D를 잇는 직선은 실제 주행 경로가 아니므로 OSM 지도에 그리지 않습니다.
-            // 요청 출발지/도착지는 각각 마커로 표시하고, 실제 차량 이동은
-            // actual_vehicle_paths 및 OSM active_routes 폴리라인으로만 표시합니다.
-            payload.road_network_paths.forEach(line => addPath(line.path, {{
-              color: line.color_hex,
-              weight: 6,
-              opacity: 0.9
-            }}, "도로망 경로 · " + (line.vehicle_id || "")));
-            payload.planned_route_history.forEach(line => addPath(line.path, {{
-              color: line.color_hex,
-              weight: 3,
-              opacity: 0.5,
-              dashArray: "4 8"
-            }}, "계획 경로 이력 · " + (line.vehicle_id || "")));
-            payload.actual_vehicle_paths.forEach(line => addPath(line.path, {{
-              color: line.color_hex,
-              weight: 4,
-              opacity: 0.95
-            }}, "실제 주행 누적 경로 · " + (line.vehicle_id || "")));
-            payload.active_routes.forEach(line => addPath(line.path, {{
-              color: line.color_hex,
-              weight: 5,
-              opacity: 0.95,
-              dashArray: "8 6"
-            }}, "현재 경로 계획 · " + (line.vehicle_id || "")));
-
-            payload.vehicle_start_points.forEach(point => addCircle(point, {{
-              radius: 8,
-              color: point.color_hex,
-              weight: 3,
-              fillColor: "#ffffff",
-              fillOpacity: 0.9
-            }}, "차량 시작 위치 · " + (point.vehicle_id || "")));
-            payload.vehicle_points.forEach(point => addVehicle(point));
-            payload.request_origin_points.forEach(point => addDivMarker(point));
-            payload.request_destination_points.forEach(point => addDivMarker(point));
-
-            if (!fixedCamera && pointCandidates.length > 1) {{
-              const bounds = L.latLngBounds(pointCandidates.map(p => [p[1], p[0]]));
-              map.fitBounds(bounds, {{ padding: [24, 24] }});
-            }} else if (!fixedCamera && pointCandidates.length === 1) {{
-              map.setView([pointCandidates[0][1], pointCandidates[0][0]], {12 if compact else 13});
-            }} else if (!fixedCamera) {{
-              map.setView([{DEFAULT_LATLON_START[0]}, {DEFAULT_LATLON_START[1]}], 13);
-            }}
-          }}
-        </script>
-      </body>
-    </html>
-    """
-    components.html(html, height=component_height, scrolling=False)
+    # A keyed custom component retains its iframe and Leaflet instance on reruns.
+    # Only JSON arguments change as the timeline advances.
+    leaflet_map = components.declare_component(
+        "mobility_leaflet", path=str(Path(__file__).with_name("leaflet_map"))
+    )
+    leaflet_map(
+        payload=payload,
+        height=540 if compact else 620,
+        compact=compact,
+        view_id=st.session_state.get("dashboard_map_run_id", "preview") if not compact else "preview",
+        fallback_svg=build_coordinate_svg(payload, compact=compact, include_intro=False),
+        key="osm_initial_map" if compact else "osm_result_map",
+        default=None,
+    )
     if show_supporting_info:
         render_map_supporting_info(
             payload,
