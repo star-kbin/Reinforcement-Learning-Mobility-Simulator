@@ -17,6 +17,16 @@ function createMobilityMap(L, container, attachWheel) {
   const latlng = p => [p.coordinates[1], p.coordinates[0]];
 
   function update(payload, nextViewId, compact) {
+    // Reframe only for a new episode. Neither a tick nor seeking resets the camera.
+    if (!initialized || nextViewId !== viewId) {
+      const points = ['vehicle_points','vehicle_start_points','request_origin_points','request_destination_points']
+        .flatMap(kind => (payload[kind] || []).map(latlng));
+      if (payload.view_bounds) map.fitBounds(payload.view_bounds, {padding:[40,40],maxZoom:16,animate:false});
+      else if (points.length > 1) map.fitBounds(L.latLngBounds(points), {padding:[24,24],maxZoom:16,animate:false});
+      else map.setView(points[0] || [37.513620,126.941570],13,{animate:false});
+      initialized = true;
+      viewId = nextViewId;
+    }
     const present = new Set();
     function reconcile(key, create, refresh) {
       present.add(key);
@@ -79,16 +89,6 @@ function createMobilityMap(L, container, attachWheel) {
     }
     for (const [key, layer] of layers) {
       if (!present.has(key)) { map.removeLayer(layer); layers.delete(key); }
-    }
-    // Reframe only for a new episode. Neither a tick nor seeking resets the camera.
-    if (!initialized || nextViewId !== viewId) {
-      const points = ['vehicle_points','vehicle_start_points','request_origin_points','request_destination_points']
-        .flatMap(kind => (payload[kind] || []).map(latlng));
-      if (payload.view_bounds) map.fitBounds(payload.view_bounds, {padding:[40,40],maxZoom:16,animate:false});
-      else if (points.length > 1) map.fitBounds(L.latLngBounds(points), {padding:[24,24],maxZoom:16,animate:false});
-      else map.setView(points[0] || [37.513620,126.941570],13,{animate:false});
-      initialized = true;
-      viewId = nextViewId;
     }
     map.invalidateSize({pan:false});
   }

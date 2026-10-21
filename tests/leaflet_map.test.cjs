@@ -4,14 +4,15 @@ const {createMobilityMap} = require('../dashboard/leaflet_map/map.js');
 
 function setup() {
   let maps = 0, tiles = 0, fits = 0, removed = 0, cleanups = 0;
+  let viewReady = false;
   const camera = {center:[37.5,126.94],zoom:13};
   const map = {options:null, removeLayer(){removed++;}, invalidateSize(){}, remove(){},
-    fitBounds(){fits++;}, setView(){fits++;}};
+    fitBounds(){fits++;viewReady=true;}, setView(){fits++;viewReady=true;}};
   function layer() {
     return {position:null, path:null, popup:null, tooltip:null,
       addTo(){return this;}, bindPopup(v){this.popup=v;return this;}, setPopupContent(v){this.popup=v;return this;},
       setLatLng(v){this.position=v;return this;}, setLatLngs(v){this.path=v;return this;},
-      setStyle(){return this;}, setIcon(v){this.icon=v;return this;}, bringToFront(){},
+      setStyle(){assert.ok(viewReady, 'Leaflet needs an initialized view before styling vector layers');return this;}, setIcon(v){this.icon=v;return this;}, bringToFront(){},
       getTooltip(){return this.tooltip;}, bindTooltip(v,options){this.tooltip={v,options};return this;}};
   }
   const L = {map(_,options){maps++;map.options=options;return map;},
